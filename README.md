@@ -14,3 +14,10 @@ Applied-Deep-Learning-Coursework 2024
 6. Replicate published experiments from published academic papers
 
 </details>
+
+
+## Work Tracker
+| Check in time | Check out time |
+| ------------- | ------------- |
+| 11:15 (Sat 08/Nov/24) | Content Cell  |
+| Content Cell  | Content Cell  |
