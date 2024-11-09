@@ -17,7 +17,4 @@ Applied-Deep-Learning-Coursework 2024
 
 
 ## Work Tracker
-| Check in time | Check out time |
-| ------------- | ------------- |
-| 11:15 (Sat 08/Nov/24) | Content Cell  |
-| Content Cell  | Content Cell  |
+Keep track of work progress using this [Workbook](https://uob-my.sharepoint.com/:x:/r/personal/fo21366_bristol_ac_uk/Documents/Workbook.xlsx?d=w39faa93226574c2685f0ee1f438ab3fd&csf=1&web=1&e=deHRKE)
