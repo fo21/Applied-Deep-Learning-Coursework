@@ -9,8 +9,8 @@ Applied-Deep-Learning-Coursework 2024
 <details>
 
 <summary>Learning Objectives (Detailed)</summary>
-- [ ] Analyse and discuss the role of a variety of optimization approaches in parameter training for deep architectures
-- [ ] Setup, train and evaluate deep architectures on public datasets
-- [ ]  Replicate published experiments from published academic papers
+2. Analyse and discuss the role of a variety of optimization approaches in parameter training for deep architectures
+3. Setup, train and evaluate deep architectures on public datasets
+6. Replicate published experiments from published academic papers
 
 </details>
