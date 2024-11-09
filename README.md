@@ -1,5 +1,6 @@
 # Applied-Deep-Learning-Coursework
-Applied-Deep-Learning-Coursework 2024
+Applied-Deep-Learning-Coursework 2024 Brief [here](https://uob-my.sharepoint.com/:w:/g/personal/mw1760_bristol_ac_uk/EXOwIUeYHPVGrjhJhKJ2sAoBMxarcz9ksWrf0pLzweavig?e=xgKW1w)
+
 
 ## Learning Objectives
 - [ ] Optimisation approaches in parameter training
