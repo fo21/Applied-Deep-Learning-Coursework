@@ -17,14 +17,19 @@ from torchvision import transforms
 import argparse
 from pathlib import Path
 
+from dataset import MIT
+
 torch.backends.cudnn.benchmark = True
 
 parser = argparse.ArgumentParser(
-    description="Train a simple CNN on CIFAR-10",
+    description="Train a MRCNN on MIT dataset",
     formatter_class=argparse.ArgumentDefaultsHelpFormatter,
 )
-default_dataset_dir = Path.home() / ".cache" / "torch" / "datasets"
-parser.add_argument("--dataset-root", default=default_dataset_dir)
+#default_dataset_dir = Path.home() / ".cache" / "torch" / "datasets"
+train_dataset_path = '/train_data.pth.tar'
+val_dataset_path = 'val_data.pth.tar'
+test_dataset_path = 'test_data.pth.tar'
+#parser.add_argument("--dataset-root", default=default_dataset_dir)
 parser.add_argument("--log-dir", default=Path("logs"), type=Path)
 parser.add_argument("--learning-rate", default=1e-2, type=float, help="Learning rate")
 parser.add_argument(
@@ -81,12 +86,9 @@ else:
 def main(args):
     transform = transforms.ToTensor()
     args.dataset_root.mkdir(parents=True, exist_ok=True)
-    train_dataset = torchvision.datasets.CIFAR10(
-        args.dataset_root, train=True, download=True, transform=transform
-    )
-    test_dataset = torchvision.datasets.CIFAR10(
-        args.dataset_root, train=False, download=False, transform=transform
-    )
+    train_dataset = MIT(dataset_path=train_dataset_path)
+    test_dataset = MIT(dataset_path=test_dataset_path)
+    val_dataset = MIT(dataset_path=val_dataset_path)
     train_loader = torch.utils.data.DataLoader(
         train_dataset,
         shuffle=True,
@@ -101,11 +103,18 @@ def main(args):
         num_workers=args.worker_count,
         pin_memory=True,
     )
+    val_loader = torch.utils.data.DataLoader(
+        val_dataset,
+        shuffle=False,
+        batch_size=args.batch_size,
+        num_workers=args.worker_count,
+        pin_memory=True,
+    )
 
-    model = CNN(height=32, width=32, channels=3, class_count=10)
+    model = MrCNN(input_channels=3, output_classes=1)
 
     ## TASK 8: Redefine the criterion to be softmax cross entropy
-    criterion = nn.CrossEntropyLoss()
+    criterion = nn.BCEWithLogitsLoss()
 
     ## TASK 11: Define the optimizer
     optimizer = torch.optim.SGD(model.parameters(), lr=args.learning_rate)
@@ -129,7 +138,81 @@ def main(args):
 
     summary_writer.close()
 
+class MrCNN(nn.Module):
+    def __init__(self, input_channels=3, output_classes=1):
+        super(MrCNN, self).__init__()
 
+        # Stream 1: C[96] - P[96] - C[160] - P[160] - C[288] - P[288]
+        self.stream1 = nn.Sequential(
+            nn.Conv2d(input_channels, 96, kernel_size=7, stride=1),
+            nn.ReLU(),
+            nn.MaxPool2d(2, 2),
+            nn.Conv2d(96, 160, kernel_size=3, stride=1),
+            nn.ReLU(),
+            nn.MaxPool2d(2, 2),
+            nn.Conv2d(160, 288, kernel_size=3, stride=1),
+            nn.ReLU(),
+            nn.MaxPool2d(2, 2),
+            nn.Flatten(),
+            nn.Linear(288 * 6 * 6, 512),
+            nn.ReLU(),
+        )
+
+        # Stream 2: Same as Stream 1
+        self.stream2 = nn.Sequential(
+            nn.Conv2d(input_channels, 96, kernel_size=7, stride=1),
+            nn.ReLU(),
+            nn.MaxPool2d(2, 2),
+            nn.Conv2d(96, 160, kernel_size=3, stride=1),
+            nn.ReLU(),
+            nn.MaxPool2d(2, 2),
+            nn.Conv2d(160, 288, kernel_size=3, stride=1),
+            nn.ReLU(),
+            nn.MaxPool2d(2, 2),
+            nn.Flatten(),
+            nn.Linear(288 * 6 * 6, 512),
+            nn.ReLU(),
+        )
+
+        # Stream 3: Same as Stream 1
+        self.stream3 = nn.Sequential(
+            nn.Conv2d(input_channels, 96, kernel_size=7, stride=1),
+            nn.ReLU(),
+            nn.MaxPool2d(2, 2),
+            nn.Conv2d(96, 160, kernel_size=3, stride=1),
+            nn.ReLU(),
+            nn.MaxPool2d(2, 2),
+            nn.Conv2d(160, 288, kernel_size=3, stride=1),
+            nn.ReLU(),
+            nn.MaxPool2d(2, 2),
+            nn.Flatten(),
+            nn.Linear(288 * 6 * 6, 512),
+            nn.ReLU(),
+        )
+
+        # Fusion Layer: Concatenate the output of all three streams
+        self.fusion_fc = nn.Linear(512 * 3, 512)
+
+        # Output Layer: Logistic regression (binary classification)
+        self.output_layer = nn.Linear(512, output_classes)
+
+    def forward(self, x):
+        # Pass the input through each stream
+        stream1_out = self.stream1(x)
+        stream2_out = self.stream2(x)
+        stream3_out = self.stream3(x)
+
+        # Concatenate the output from all streams
+        combined = torch.cat((stream1_out, stream2_out, stream3_out), dim=1)
+
+        # Pass through the fusion layer
+        fusion_out = F.relu(self.fusion_fc(combined))
+
+        # Output layer (logistic regression for binary classification)
+        output = torch.sigmoid(self.output_layer(fusion_out))  # Use sigmoid for binary classification
+
+        return output
+"""
 class CNN(nn.Module):
     def __init__(self, height: int, width: int, channels: int, class_count: int):
         super().__init__()
@@ -194,8 +277,7 @@ class CNN(nn.Module):
             nn.init.zeros_(layer.bias)
         if hasattr(layer, "weight"):
             nn.init.kaiming_normal_(layer.weight)
-
-
+"""
 class Trainer:
     def __init__(
         self,
@@ -237,7 +319,7 @@ class Trainer:
                 ## TASK 1: Compute the forward pass of the model, print the output shape
                 ##         and quit the program
                 #output =
-                output = self.model.forward(batch)
+                #output = self.model.forward(batch)
                 #print(output.shape)
                 #import sys; sys.exit(1)
                 ## TASK 7: Rename `output` to `logits`, remove the output shape printing
@@ -254,7 +336,7 @@ class Trainer:
                 self.optimizer.zero_grad()
                 
                 with torch.no_grad():
-                    preds = logits.argmax(-1)
+                    preds = torch.sigmoid(logits).round()
                     accuracy = compute_accuracy(labels, preds)
 
                 data_load_time = data_load_end_time - data_load_start_time
@@ -338,7 +420,6 @@ class Trainer:
                 self.step
         )
         print(f"validation loss: {average_loss:.5f}, accuracy: {accuracy * 100:2.2f}")
-
 
 def compute_accuracy(
     labels: Union[torch.Tensor, np.ndarray], preds: Union[torch.Tensor, np.ndarray]
