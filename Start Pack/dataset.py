@@ -47,7 +47,7 @@ class MIT(data.Dataset):
                 the full size image of shape [3, H, W].
             2) y: The label for the crop. 1 = a fixation point, 0 = a
                 non-fixation point. -1 = Unlabelled i.e. val and test
-            3) file: The file name the crops were extracted from.
+            3) :file The file name the crops were extracted from.
             
         If the dataset belongs to val or test, there are 4 additional keys:
             1) X_400: The image resized to 400x400

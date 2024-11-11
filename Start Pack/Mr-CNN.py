@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import os
 import time
 from multiprocessing import cpu_count
 from typing import Union, NamedTuple
@@ -26,9 +27,9 @@ parser = argparse.ArgumentParser(
     formatter_class=argparse.ArgumentDefaultsHelpFormatter,
 )
 #default_dataset_dir = Path.home() / ".cache" / "torch" / "datasets"
-train_dataset_path = '/train_data.pth.tar'
-val_dataset_path = 'val_data.pth.tar'
-test_dataset_path = 'test_data.pth.tar'
+train_dataset_path = './train_data.pth.tar'
+val_dataset_path = './val_data.pth.tar'
+test_dataset_path = './test_data.pth.tar'
 #parser.add_argument("--dataset-root", default=default_dataset_dir)
 parser.add_argument("--log-dir", default=Path("logs"), type=Path)
 parser.add_argument("--learning-rate", default=1e-2, type=float, help="Learning rate")
@@ -85,10 +86,10 @@ else:
 
 def main(args):
     transform = transforms.ToTensor()
-    args.dataset_root.mkdir(parents=True, exist_ok=True)
-    train_dataset = MIT(dataset_path=train_dataset_path)
-    test_dataset = MIT(dataset_path=test_dataset_path)
-    val_dataset = MIT(dataset_path=val_dataset_path)
+    #args.dataset_root.mkdir(parents=True, exist_ok=True)
+    train_dataset = MIT(dataset_path=train_dataset_path).dataset
+    test_dataset = MIT(dataset_path=test_dataset_path).dataset
+    val_dataset = MIT(dataset_path=val_dataset_path).dataset
     train_loader = torch.utils.data.DataLoader(
         train_dataset,
         shuffle=True,
@@ -142,142 +143,54 @@ class MrCNN(nn.Module):
     def __init__(self, input_channels=3, output_classes=1):
         super(MrCNN, self).__init__()
 
-        # Stream 1: C[96] - P[96] - C[160] - P[160] - C[288] - P[288]
-        self.stream1 = nn.Sequential(
-            nn.Conv2d(input_channels, 96, kernel_size=7, stride=1),
-            nn.ReLU(),
-            nn.MaxPool2d(2, 2),
-            nn.Conv2d(96, 160, kernel_size=3, stride=1),
-            nn.ReLU(),
-            nn.MaxPool2d(2, 2),
-            nn.Conv2d(160, 288, kernel_size=3, stride=1),
-            nn.ReLU(),
-            nn.MaxPool2d(2, 2),
-            nn.Flatten(),
-            nn.Linear(288 * 6 * 6, 512),
-            nn.ReLU(),
-        )
+        # Define one set of convolutional layers to be shared across all three streams
+        self.shared_conv1 = nn.Conv2d(input_channels, 96, kernel_size=7, stride=1)
+        self.shared_conv2 = nn.Conv2d(96, 160, kernel_size=3, stride=1)
+        self.shared_conv3 = nn.Conv2d(160, 288, kernel_size=3, stride=1)
+        
+        # Define the pooling and FC layers for each stream
+        self.pool = nn.MaxPool2d(2, 2)
+        self.flatten = nn.Flatten()
+        self.fc1 = nn.Linear(288 * 3 * 3, 512)  # Output size from convolutional layers is 3x3 after pooling
 
-        # Stream 2: Same as Stream 1
-        self.stream2 = nn.Sequential(
-            nn.Conv2d(input_channels, 96, kernel_size=7, stride=1),
-            nn.ReLU(),
-            nn.MaxPool2d(2, 2),
-            nn.Conv2d(96, 160, kernel_size=3, stride=1),
-            nn.ReLU(),
-            nn.MaxPool2d(2, 2),
-            nn.Conv2d(160, 288, kernel_size=3, stride=1),
-            nn.ReLU(),
-            nn.MaxPool2d(2, 2),
-            nn.Flatten(),
-            nn.Linear(288 * 6 * 6, 512),
-            nn.ReLU(),
-        )
-
-        # Stream 3: Same as Stream 1
-        self.stream3 = nn.Sequential(
-            nn.Conv2d(input_channels, 96, kernel_size=7, stride=1),
-            nn.ReLU(),
-            nn.MaxPool2d(2, 2),
-            nn.Conv2d(96, 160, kernel_size=3, stride=1),
-            nn.ReLU(),
-            nn.MaxPool2d(2, 2),
-            nn.Conv2d(160, 288, kernel_size=3, stride=1),
-            nn.ReLU(),
-            nn.MaxPool2d(2, 2),
-            nn.Flatten(),
-            nn.Linear(288 * 6 * 6, 512),
-            nn.ReLU(),
-        )
-
-        # Fusion Layer: Concatenate the output of all three streams
+        # Fusion layer after concatenating the three streams
         self.fusion_fc = nn.Linear(512 * 3, 512)
 
-        # Output Layer: Logistic regression (binary classification)
+        # Output layer for binary classification
         self.output_layer = nn.Linear(512, output_classes)
 
-    def forward(self, x):
-        # Pass the input through each stream
-        stream1_out = self.stream1(x)
-        stream2_out = self.stream2(x)
-        stream3_out = self.stream3(x)
-
-        # Concatenate the output from all streams
-        combined = torch.cat((stream1_out, stream2_out, stream3_out), dim=1)
-
-        # Pass through the fusion layer
-        fusion_out = F.relu(self.fusion_fc(combined))
-
-        # Output layer (logistic regression for binary classification)
-        output = torch.sigmoid(self.output_layer(fusion_out))  # Use sigmoid for binary classification
-
-        return output
-"""
-class CNN(nn.Module):
-    def __init__(self, height: int, width: int, channels: int, class_count: int):
-        super().__init__()
-        self.input_shape = ImageShape(height=height, width=width, channels=channels)
-        self.class_count = class_count
-
-        self.conv1 = nn.Conv2d(
-            in_channels=self.input_shape.channels,
-            out_channels=32,
-            kernel_size=(5, 5),
-            padding=(2, 2),
-        )
-        self.initialise_layer(self.conv1)
-        self.pool1 = nn.MaxPool2d(kernel_size=(2, 2), stride=(2, 2))
-        ## TASK 2-1: Define the second convolutional layer and initialise its parameters
-        self.conv2 = nn.Conv2d(
-            in_channels=32,  # Change to 32
-            out_channels=64,
-            kernel_size=(5, 5),
-            padding=(2, 2),
-        )
-        self.initialise_layer(self.conv2)
-        self.pool2 = nn.MaxPool2d(kernel_size=(2, 2), stride=(2, 2))
-        ## TASK 3-1: Define the second pooling layer
-        self.conv3 = nn.Conv2d(
-            in_channels=64,  # Change to 64
-            out_channels=64,
-            kernel_size=(5, 5),
-            padding=(2, 2),
-        )
-        self.initialise_layer(self.conv3)
-        self.pool3 = nn.MaxPool2d(kernel_size=(2, 2), stride=(2, 2))
-
-        ## TASK 5-1: Define the first FC layer and initialise its parameters
-        self.fc1 = nn.Linear(4096, 1024)
-        self.initialise_layer(self.fc1)
-        ## TASK 6-1: Define the last FC layer and initialise its parameters
-        self.fc2 = nn.Linear(1024, 10)
-        self.initialise_layer(self.fc2)
-    def forward(self, images: torch.Tensor) -> torch.Tensor:
-        x = F.relu(self.conv1(images))
-        x = self.pool1(x)
-        ## TASK 2-2: Pass x through the second convolutional layer
-        x = F.relu(self.conv2(x))  
-        x = self.pool2(x)
-        ## TASK 3-2: Pass x through the second pooling layer
-        x = F.relu(self.conv3(x))  
-        #x = self.pool3(x)
-        ## TASK 4: Flatten the output of the pooling layer so it is of shape
-        ##         (batch_size, 4096)
-        x = torch.flatten(x,start_dim=1)
-        ## TASK 5-2: Pass x through the first fully connected layer
-        x = F.relu(self.fc1(x))
-        ## TASK 6-2: Pass x through the last fully connected layer
+    def forward_stream(self, x):
+        # Pass through shared convolutional layers with pooling
+        x = F.relu(self.shared_conv1(x))
+        x = self.pool(x)
+        x = F.relu(self.shared_conv2(x))
+        x = self.pool(x)
+        x = F.relu(self.shared_conv3(x))
+        x = self.pool(x)
         
-        x = self.fc2(x)
+        # Flatten and pass through FC layer for each stream
+        x = self.flatten(x)
+        x = F.relu(self.fc1(x))
         return x
 
-    @staticmethod
-    def initialise_layer(layer):
-        if hasattr(layer, "bias"):
-            nn.init.zeros_(layer.bias)
-        if hasattr(layer, "weight"):
-            nn.init.kaiming_normal_(layer.weight)
-"""
+    def forward(self, x):
+        # Split input into three crops for each stream
+        crop1, crop2, crop3 = x[:, 0], x[:, 1], x[:, 2]  # Assuming x has shape [batch_size, 3, 3, 42, 42]
+        
+        # Pass each crop through the shared convolutional layers independently
+        stream1_out = self.forward_stream(crop1)
+        stream2_out = self.forward_stream(crop2)
+        stream3_out = self.forward_stream(crop3)
+
+        # Concatenate outputs from the three streams
+        combined = torch.cat((stream1_out, stream2_out, stream3_out), dim=1)
+
+        # Pass through fusion and output layers
+        fusion_out = F.relu(self.fusion_fc(combined))
+        output = torch.sigmoid(self.output_layer(fusion_out)).squeeze(1)  # Use sigmoid for binary classification
+
+        return output
+
 class Trainer:
     def __init__(
         self,
@@ -310,9 +223,9 @@ class Trainer:
         for epoch in range(start_epoch, epochs):
             self.model.train()
             data_load_start_time = time.time()
-            for batch, labels in self.train_loader:
-                batch = batch.to(self.device)
-                labels = labels.to(self.device)
+            for data in self.train_loader:
+                batch = data["X"].to(self.device)       
+                label = data["y"].to(self.device).float() 
                 data_load_end_time = time.time()
 
 
@@ -327,7 +240,7 @@ class Trainer:
                 logits = self.model.forward(batch)
                 ## TASK 9: Compute the loss using self.criterion and
                 ##         store it in a variable called `loss`
-                loss = self.criterion(logits, labels)
+                loss = self.criterion(logits, label)
                 #print(f"Epoch [{epoch + 1}/{epochs}], Batch Loss: {loss.item()}")
                 ## TASK 10: Compute the backward pass
                 loss.backward()
@@ -337,7 +250,7 @@ class Trainer:
                 
                 with torch.no_grad():
                     preds = torch.sigmoid(logits).round()
-                    accuracy = compute_accuracy(labels, preds)
+                    accuracy = compute_accuracy(label, preds)
 
                 data_load_time = data_load_end_time - data_load_start_time
                 step_time = time.time() - data_load_end_time
@@ -421,17 +334,10 @@ class Trainer:
         )
         print(f"validation loss: {average_loss:.5f}, accuracy: {accuracy * 100:2.2f}")
 
-def compute_accuracy(
-    labels: Union[torch.Tensor, np.ndarray], preds: Union[torch.Tensor, np.ndarray]
-) -> float:
-    """
-    Args:
-        labels: ``(batch_size, class_count)`` tensor or array containing example labels
-        preds: ``(batch_size, class_count)`` tensor or array containing model prediction
-    """
-    assert len(labels) == len(preds)
-    return float((labels == preds).sum()) / len(labels)
-
+def compute_accuracy(labels, preds):
+    correct = (labels == preds).sum().item()
+    total = labels.size(0)
+    return correct / total
 
 def get_summary_writer_log_dir(args: argparse.Namespace) -> str:
     """Get a unique directory that hasn't been logged to before for use with a TB
