@@ -26,11 +26,11 @@ parser = argparse.ArgumentParser(
     description="Train a MRCNN on MIT dataset",
     formatter_class=argparse.ArgumentDefaultsHelpFormatter,
 )
-#default_dataset_dir = Path.home() / ".cache" / "torch" / "datasets"
+default_dataset_dir = Path.home() / ".cache" / "torch" / "datasets"
 train_dataset_path = './train_data.pth.tar'
 val_dataset_path = './val_data.pth.tar'
 test_dataset_path = './test_data.pth.tar'
-#parser.add_argument("--dataset-root", default=default_dataset_dir)
+parser.add_argument("--dataset-root", default=default_dataset_dir)
 parser.add_argument("--log-dir", default=Path("logs"), type=Path)
 parser.add_argument("--learning-rate", default=1e-2, type=float, help="Learning rate")
 parser.add_argument(
@@ -71,82 +71,28 @@ parser.add_argument(
     help="Number of worker processes used to load data.",
 )
 
-
-class ImageShape(NamedTuple):
-    height: int
-    width: int
-    channels: int
-
+train_dataset_path = './train_data.pth.tar'
+val_dataset_path = './val_data.pth.tar'
+test_dataset_path = './test_data.pth.tar'
 
 if torch.cuda.is_available():
     DEVICE = torch.device("cuda")
 else:
     DEVICE = torch.device("cpu")
 
+class ImageShape(NamedTuple):
+    height: int
+    width: int
+    channels: int
 
-def main(args):
-    transform = transforms.ToTensor()
-    #args.dataset_root.mkdir(parents=True, exist_ok=True)
-    train_dataset = MIT(dataset_path=train_dataset_path).dataset
-    test_dataset = MIT(dataset_path=test_dataset_path).dataset
-    val_dataset = MIT(dataset_path=val_dataset_path).dataset
-    train_loader = torch.utils.data.DataLoader(
-        train_dataset,
-        shuffle=True,
-        batch_size=args.batch_size,
-        pin_memory=True,
-        num_workers=args.worker_count,
-    )
-    test_loader = torch.utils.data.DataLoader(
-        test_dataset,
-        shuffle=False,
-        batch_size=args.batch_size,
-        num_workers=args.worker_count,
-        pin_memory=True,
-    )
-    val_loader = torch.utils.data.DataLoader(
-        val_dataset,
-        shuffle=False,
-        batch_size=args.batch_size,
-        num_workers=args.worker_count,
-        pin_memory=True,
-    )
-
-    model = MrCNN(input_channels=3, output_classes=1)
-
-    ## TASK 8: Redefine the criterion to be softmax cross entropy
-    criterion = nn.BCEWithLogitsLoss()
-
-    ## TASK 11: Define the optimizer
-    optimizer = torch.optim.SGD(model.parameters(), lr=args.learning_rate)
-
-    log_dir = get_summary_writer_log_dir(args)
-    print(f"Writing logs to {log_dir}")
-    summary_writer = SummaryWriter(
-            str(log_dir),
-            flush_secs=5
-    )
-    trainer = Trainer(
-        model, train_loader, test_loader, criterion, optimizer, summary_writer, DEVICE
-    )
-
-    trainer.train(
-        args.epochs,
-        args.val_frequency,
-        print_frequency=args.print_frequency,
-        log_frequency=args.log_frequency,
-    )
-
-    summary_writer.close()
-
-class CNN(nn.Module):
-    def __init__(self, height: int, width: int, channels: int, class_count: int):
+class MrCNN(nn.Module):
+    def __init__(self, input_channels=3, output_classes=1):
         super().__init__()
-        self.input_shape = ImageShape(height=height, width=width, channels=channels)
-        self.class_count = class_count
+        self.input_channels = input_channels
+        self.class_count = output_classes
 
         self.conv1 = nn.Conv2d(
-            in_channels=self.input_shape.channels,
+            in_channels=self.input_channels,
             out_channels=96,
             kernel_size=(7, 7),
         )
@@ -169,9 +115,7 @@ class CNN(nn.Module):
         self.initialise_layer(self.conv3)
         self.pool3 = nn.MaxPool2d(kernel_size=(2, 2), stride=(1, 1))
 
-        self.pool3 = torch.flatten(self.pool3, start_dim = 1)
-
-        self.fc1 = nn.Linear(2592, 512)
+        self.fc1 = nn.Linear(3x242208, 512)
         self.initialise_layer(self.fc1)
         
         self.fc2 = nn.Linear(512, 1)
@@ -179,18 +123,12 @@ class CNN(nn.Module):
     def forward(self, images: torch.Tensor) -> torch.Tensor:
         x = F.relu(self.conv1(images))
         x = self.pool1(x)
-        ## TASK 2-2: Pass x through the second convolutional layer
         x = F.relu(self.conv2(x))  
         x = self.pool2(x)
-        ## TASK 3-2: Pass x through the second pooling layer
         x = F.relu(self.conv3(x))  
         x = self.pool3(x)
-        ## TASK 4: Flatten the output of the pooling layer so it is of shape
-        ##         (batch_size, 4096)
         x = torch.flatten(x,start_dim=1)
-        ## TASK 5-2: Pass x through the first fully connected layer
         x = F.relu(self.fc1(x))
-        ## TASK 6-2: Pass x through the last fully connected layer
         
         x = self.fc2(x)
         return x
@@ -202,57 +140,11 @@ class CNN(nn.Module):
         if hasattr(layer, "weight"):
             nn.init.kaiming_normal_(layer.weight)
 
-class MrCNN(nn.Module):
-    def __init__(self, input_channels=3, output_classes=1):
-        super(MrCNN, self).__init__()
+def compute_accuracy(labels, preds):
+    correct = (labels == preds).sum().item()
+    total = labels.size(0)
+    return correct / total
 
-        # Define one set of convolutional layers to be shared across all three streams
-        self.shared_conv1 = nn.Conv2d(input_channels, 96, kernel_size=7, stride=1)
-        self.shared_conv2 = nn.Conv2d(96, 160, kernel_size=3, stride=1)
-        self.shared_conv3 = nn.Conv2d(160, 288, kernel_size=3, stride=1)
-        
-        # Define the pooling and FC layers for each stream
-        self.pool = nn.MaxPool2d(2, 2)
-        self.flatten = nn.Flatten()
-        self.fc1 = nn.Linear(288 * 3 * 3, 512)  # Output size from convolutional layers is 3x3 after pooling
-
-        # Fusion layer after concatenating the three streams
-        self.fusion_fc = nn.Linear(512 * 3, 512)
-
-        # Output layer for binary classification
-        self.output_layer = nn.Linear(512, output_classes)
-
-    def forward_stream(self, x):
-        # Pass through shared convolutional layers with pooling
-        x = F.relu(self.shared_conv1(x))
-        x = self.pool(x)
-        x = F.relu(self.shared_conv2(x))
-        x = self.pool(x)
-        x = F.relu(self.shared_conv3(x))
-        x = self.pool(x)
-        
-        # Flatten and pass through FC layer for each stream
-        x = self.flatten(x)
-        x = F.relu(self.fc1(x))
-        return x
-
-    def forward(self, x):
-        # Split input into three crops for each stream
-        crop1, crop2, crop3 = x[:, 0], x[:, 1], x[:, 2]  # Assuming x has shape [batch_size, 3, 3, 42, 42]
-        
-        # Pass each crop through the shared convolutional layers independently
-        stream1_out = self.forward_stream(crop1)
-        stream2_out = self.forward_stream(crop2)
-        stream3_out = self.forward_stream(crop3)
-
-        # Concatenate outputs from the three streams
-        combined = torch.cat((stream1_out, stream2_out, stream3_out), dim=1)
-
-        # Pass through fusion and output layers
-        fusion_out = F.relu(self.fusion_fc(combined))
-        output = torch.sigmoid(self.output_layer(fusion_out)).squeeze(1)  # Use sigmoid for binary classification
-
-        return output
 
 class Trainer:
     def __init__(
@@ -286,17 +178,18 @@ class Trainer:
         for epoch in range(start_epoch, epochs):
             self.model.train()
             data_load_start_time = time.time()
-            for i in range (0,len(self.train_loader) - 1):
-                batch = self.train_loader[i][0]
-                label = self.train_loader[i][1]
-                
+            for index in range(0, 10):
+                batch = self.train_loader.dataset[index]["X"]
+                label = self.train_loader.dataset[index]["y"]
+                #batch = batch.to(self.device)
+                #label = label.to(self.device)
                 data_load_end_time = time.time()
 
 
                 ## TASK 1: Compute the forward pass of the model, print the output shape
                 ##         and quit the program
                 #output =
-                #output = self.model.forward(batch)
+                output = self.model.forward(batch)
                 #print(output.shape)
                 #import sys; sys.exit(1)
                 ## TASK 7: Rename `output` to `logits`, remove the output shape printing
@@ -313,7 +206,7 @@ class Trainer:
                 self.optimizer.zero_grad()
                 
                 with torch.no_grad():
-                    preds = torch.sigmoid(logits).round()
+                    preds = logits.argmax(-1)
                     accuracy = compute_accuracy(label, preds)
 
                 data_load_time = data_load_end_time - data_load_start_time
@@ -371,15 +264,17 @@ class Trainer:
 
         # No need to track gradients for validation, we're not optimizing.
         with torch.no_grad():
-            for batch, labels in self.val_loader:
+            for index in range(0, 10):
+                batch = self.val_loader.dataset[index]["X_400"]
+                label = self.val_loader.dataset[index]["y"]
                 batch = batch.to(self.device)
-                labels = labels.to(self.device)
+                label = label.to(self.device)
                 logits = self.model(batch)
-                loss = self.criterion(logits, labels)
+                loss = self.criterion(logits, label)
                 total_loss += loss.item()
                 preds = logits.argmax(dim=-1).cpu().numpy()
                 results["preds"].extend(list(preds))
-                results["labels"].extend(list(labels.cpu().numpy()))
+                results["labels"].extend(list(label.cpu().numpy()))
 
         accuracy = compute_accuracy(
             np.array(results["labels"]), np.array(results["preds"])
@@ -398,10 +293,6 @@ class Trainer:
         )
         print(f"validation loss: {average_loss:.5f}, accuracy: {accuracy * 100:2.2f}")
 
-def compute_accuracy(labels, preds):
-    correct = (labels == preds).sum().item()
-    total = labels.size(0)
-    return correct / total
 
 def get_summary_writer_log_dir(args: argparse.Namespace) -> str:
     """Get a unique directory that hasn't been logged to before for use with a TB
@@ -423,6 +314,61 @@ def get_summary_writer_log_dir(args: argparse.Namespace) -> str:
             return str(tb_log_dir)
         i += 1
     return str(tb_log_dir)
+
+def main(args):
+    
+    train_dataset = MIT(dataset_path=train_dataset_path).dataset
+    test_dataset = MIT(dataset_path=test_dataset_path).dataset
+    val_dataset = MIT(dataset_path=val_dataset_path).dataset
+    
+    train_loader = torch.utils.data.DataLoader(
+        train_dataset,
+        shuffle=True,
+        batch_size=args.batch_size,
+        pin_memory=True,
+        num_workers=args.worker_count,
+    )
+    test_loader = torch.utils.data.DataLoader(
+        test_dataset,
+        shuffle=False,
+        batch_size=args.batch_size,
+        num_workers=args.worker_count,
+        pin_memory=True,
+    )
+    val_loader = torch.utils.data.DataLoader(
+        val_dataset,
+        shuffle=False,
+        batch_size=args.batch_size,
+        num_workers=args.worker_count,
+        pin_memory=True,
+    )
+
+    model = MrCNN(input_channels=3, output_classes=1)
+
+    ## TASK 8: Redefine the criterion to be softmax cross entropy
+    criterion = nn.BCEWithLogitsLoss()
+
+    ## TASK 11: Define the optimizer
+    optimizer = torch.optim.SGD(model.parameters(), lr=args.learning_rate)
+
+    log_dir = get_summary_writer_log_dir(args)
+    print(f"Writing logs to {log_dir}")
+    summary_writer = SummaryWriter(
+            str(log_dir),
+            flush_secs=5
+    )
+    trainer = Trainer(
+        model, train_loader, test_loader, criterion, optimizer, summary_writer, DEVICE
+    )
+
+    trainer.train(
+        args.epochs,
+        args.val_frequency,
+        print_frequency=args.print_frequency,
+        log_frequency=args.log_frequency,
+    )
+
+    summary_writer.close()
 
 
 if __name__ == "__main__":

@@ -10,8 +10,7 @@ def crop_to_region(coords: Tuple[int], img: Tensor, crop_size: int=42) -> Tensor
     Given coordinates in the form Tuple[int](y, x), return a cropped
     sample of the input imaged centred at (y, x), matching the input size.
     Args:
-        coords (Tuple[int]): The input coordinates (y, x) where the crop will be
-        centred.
+        coords (Tuple[int]): The input coordinates (y, x) where the crop will be centred.
         img (Tensor): The input image, either 3x400x400, 3x250x250, 3x150x150
         crop_size (int, optional): The size of the returned crop. Defaults to 42.
 
