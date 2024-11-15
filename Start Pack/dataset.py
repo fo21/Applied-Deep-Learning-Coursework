@@ -98,8 +98,9 @@ class MIT(data.Dataset):
                 crops = crop_to_region(scaled_coords, scaled_img)
                 scales.append(crops)
             img = torch.stack(scales, axis=1)
-            
+        #print(f"img shape inside __getitem__: {img.shape}")  # Check shape of img
         label = self.dataset[sample_index]['y']
+        #print(f"label shape inside __getitem__: {label.shape if isinstance(label, torch.Tensor) else type(label)}")  # Check shape of label
 
         return img, label
 

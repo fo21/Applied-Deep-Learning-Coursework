@@ -4,6 +4,7 @@ import time
 from multiprocessing import cpu_count
 from typing import Union, NamedTuple
 
+from torch.utils.data import Dataset
 import torch
 import torch.backends.cudnn
 import numpy as np
@@ -20,12 +21,15 @@ from pathlib import Path
 
 from dataset import MIT
 
+import numpy as np
+from skimage.transform import resize
+
 torch.backends.cudnn.benchmark = True
 
 parser = argparse.ArgumentParser(
     description="Train a MRCNN on MIT dataset",
     formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-)
+)y
 #default_dataset_dir = Path.home() / ".cache" / "torch" / "datasets"
 train_dataset_path = './train_data.pth.tar'
 val_dataset_path = './val_data.pth.tar'
@@ -87,9 +91,9 @@ else:
 def main(args):
     transform = transforms.ToTensor()
     #args.dataset_root.mkdir(parents=True, exist_ok=True)
-    train_dataset = MIT(dataset_path=train_dataset_path).dataset
-    test_dataset = MIT(dataset_path=test_dataset_path).dataset
-    val_dataset = MIT(dataset_path=val_dataset_path).dataset
+    train_dataset = MIT(dataset_path=train_dataset_path)
+    test_dataset = MIT(dataset_path=test_dataset_path)
+    val_dataset = MIT(dataset_path=val_dataset_path)
     train_loader = torch.utils.data.DataLoader(
         train_dataset,
         shuffle=True,
@@ -111,11 +115,12 @@ def main(args):
         num_workers=args.worker_count,
         pin_memory=True,
     )
+    
 
     model = MrCNN(input_channels=3, output_classes=1)
 
     ## TASK 8: Redefine the criterion to be softmax cross entropy
-    criterion = nn.BCEWithLogitsLoss()
+    criterion = nn.CrossEntropyLoss()
 
     ## TASK 11: Define the optimizer
     optimizer = torch.optim.SGD(model.parameters(), lr=args.learning_rate)
@@ -139,68 +144,23 @@ def main(args):
 
     summary_writer.close()
 
-class CNN(nn.Module):
-    def __init__(self, height: int, width: int, channels: int, class_count: int):
-        super().__init__()
-        self.input_shape = ImageShape(height=height, width=width, channels=channels)
-        self.class_count = class_count
+class CustomDataset(Dataset):
+    def __init__(self, data_list):
+        self.data_list = data_list  # This should be your list of dictionaries
 
-        self.conv1 = nn.Conv2d(
-            in_channels=self.input_shape.channels,
-            out_channels=96,
-            kernel_size=(7, 7),
-        )
-        self.initialise_layer(self.conv1)
-        self.pool1 = nn.MaxPool2d(kernel_size=(2, 2), stride=(1, 1))
+    def __len__(self):
+        # Returns the number of samples in the dataset
+        return len(self.data_list)
+
+    def __getitem__(self, idx):
+        # Fetch the dictionary at index `idx`
+        sample = self.data_list[idx]
         
-        self.conv2 = nn.Conv2d(
-            in_channels=96,  # Change to 32
-            out_channels=160,
-            kernel_size=(3, 3),
-        )
-        self.initialise_layer(self.conv2)
-        self.pool2 = nn.MaxPool2d(kernel_size=(2, 2), stride=(1, 1))
-
-        self.conv3 = nn.Conv2d(
-            in_channels=160,  # Change to 64
-            out_channels=288,
-            kernel_size=(3, 3)
-        )
-        self.initialise_layer(self.conv3)
-        self.pool3 = nn.MaxPool2d(kernel_size=(2, 2), stride=(1, 1))
-
-        self.pool3 = torch.flatten(self.pool3, start_dim = 1)
-
-        self.fc1 = nn.Linear(2592, 512)
-        self.initialise_layer(self.fc1)
+        # Ensure each field in the dictionary is a tensor for easier batching
+        sample = {key: torch.tensor(value) if not isinstance(value, torch.Tensor) else value 
+                  for key, value in sample.items()}
         
-        self.fc2 = nn.Linear(512, 1)
-        self.initialise_layer(self.fc2)
-    def forward(self, images: torch.Tensor) -> torch.Tensor:
-        x = F.relu(self.conv1(images))
-        x = self.pool1(x)
-        ## TASK 2-2: Pass x through the second convolutional layer
-        x = F.relu(self.conv2(x))  
-        x = self.pool2(x)
-        ## TASK 3-2: Pass x through the second pooling layer
-        x = F.relu(self.conv3(x))  
-        x = self.pool3(x)
-        ## TASK 4: Flatten the output of the pooling layer so it is of shape
-        ##         (batch_size, 4096)
-        x = torch.flatten(x,start_dim=1)
-        ## TASK 5-2: Pass x through the first fully connected layer
-        x = F.relu(self.fc1(x))
-        ## TASK 6-2: Pass x through the last fully connected layer
-        
-        x = self.fc2(x)
-        return x
-
-    @staticmethod
-    def initialise_layer(layer):
-        if hasattr(layer, "bias"):
-            nn.init.zeros_(layer.bias)
-        if hasattr(layer, "weight"):
-            nn.init.kaiming_normal_(layer.weight)
+        return sample
 
 class MrCNN(nn.Module):
     def __init__(self, input_channels=3, output_classes=1):
@@ -286,10 +246,9 @@ class Trainer:
         for epoch in range(start_epoch, epochs):
             self.model.train()
             data_load_start_time = time.time()
-            for i in range (0,len(self.train_loader) - 1):
-                batch = self.train_loader[i][0]
-                label = self.train_loader[i][1]
-                
+            for batch,label in self.train_loader:
+                batch = batch.to(self.device)       
+                label = label.to(self.device).float() 
                 data_load_end_time = time.time()
 
 
@@ -302,6 +261,7 @@ class Trainer:
                 ## TASK 7: Rename `output` to `logits`, remove the output shape printing
                 ##         and get rid of the `import sys; sys.exit(1)`
                 logits = self.model.forward(batch)
+                #print(f"logits: {logits}")
                 ## TASK 9: Compute the loss using self.criterion and
                 ##         store it in a variable called `loss`
                 loss = self.criterion(logits, label)
@@ -314,6 +274,7 @@ class Trainer:
                 
                 with torch.no_grad():
                     preds = torch.sigmoid(logits).round()
+                    #print(f"label: {label}, pred: {preds}")
                     accuracy = compute_accuracy(label, preds)
 
                 data_load_time = data_load_end_time - data_load_start_time
@@ -368,18 +329,40 @@ class Trainer:
         results = {"preds": [], "labels": []}
         total_loss = 0
         self.model.eval()
-
+        
         # No need to track gradients for validation, we're not optimizing.
         with torch.no_grad():
+            print(f"length of val loader: {len(self.val_loader)}")
             for batch, labels in self.val_loader:
                 batch = batch.to(self.device)
-                labels = labels.to(self.device)
+                labels = labels.to(self.device).float() #need to compute labels
+
+                # 1. Generate saliency map for each image in the batch
+                saliency_maps = []
+                for img in batch:
+                    saliency_map = calculate_saliency_map(img.cpu().numpy(), self.model)
+                    saliency_maps.append(saliency_map)
+                saliency_maps = np.array(saliency_maps)  # Shape: (batch_size, H, W)
+
+                # 2. Generate binary labels for each pixel based on saliency map
+                # For simplicity, we threshold the saliency map at 0.5 to generate binary labels
+                # Adjust this threshold as per your requirement.
+                saliency_labels = (saliency_maps > 0.5).astype(float)
+                
                 logits = self.model(batch)
+                #print(f"Predictions inside validation: {logits.size()}")
                 loss = self.criterion(logits, labels)
                 total_loss += loss.item()
-                preds = logits.argmax(dim=-1).cpu().numpy()
-                results["preds"].extend(list(preds))
-                results["labels"].extend(list(labels.cpu().numpy()))
+                preds = torch.sigmoid(logits).round()
+
+                # Ensure preds and labels are iterable
+                if preds.dim() == 0:  # If preds is a scalar, make it a list
+                    preds = preds.unsqueeze(0)
+
+                # Extend results with the batch predictions and labels
+                results["preds"].extend(preds.view(-1).cpu().tolist())  # Flatten preds to 1D list
+                results["labels"].extend(labels.view(-1).cpu().numpy().tolist())  # Flatten labels to 1D list
+                
 
         accuracy = compute_accuracy(
             np.array(results["labels"]), np.array(results["preds"])
@@ -399,9 +382,20 @@ class Trainer:
         print(f"validation loss: {average_loss:.5f}, accuracy: {accuracy * 100:2.2f}")
 
 def compute_accuracy(labels, preds):
-    correct = (labels == preds).sum().item()
-    total = labels.size(0)
-    return correct / total
+    # Ensure labels and preds are tensors
+    labels = torch.tensor(labels) if not isinstance(labels, torch.Tensor) else labels
+    preds = torch.tensor(preds) if not isinstance(preds, torch.Tensor) else preds
+
+    # Check if labels and preds are in the correct shape (should be 1D)
+    if labels.dim() == 1 and preds.dim() == 1:  # Ensure labels and preds are 1D
+        total = labels.size(0)  # Get the batch size
+        correct = (labels == preds).sum().item()  # Count the number of correct predictions
+        accuracy = correct / total  # Calculate accuracy
+    else:
+        # Handle unexpected dimensions (e.g., multi-dimensional labels)
+        raise ValueError("Labels and predictions must be 1D tensors.")
+
+    return accuracy
 
 def get_summary_writer_log_dir(args: argparse.Namespace) -> str:
     """Get a unique directory that hasn't been logged to before for use with a TB
@@ -423,6 +417,57 @@ def get_summary_writer_log_dir(args: argparse.Namespace) -> str:
             return str(tb_log_dir)
         i += 1
     return str(tb_log_dir)
+
+
+def calculate_saliency_map(image, model, grid_size=50, patch_size=[(150, 150), (250, 250), (400, 400)]):
+    """
+    Calculate the saliency map for a given image using the trained Mr-CNN model.
+    
+    Args:
+        image: Input image (H, W, C) in numpy format.
+        model: Trained Mr-CNN model.
+        grid_size: Number of locations sampled along each axis (default 50x50 grid).
+        patch_size: List of patch sizes to be resized to for processing.
+        
+    Returns:
+        saliency_map: Final saliency map resized to the original image size.
+    """
+    # 1. Prepare the down-sampled grid of locations
+    height, width = image.shape[:2]
+    x_coords = np.linspace(0, width - 1, grid_size, dtype=int)
+    y_coords = np.linspace(0, height - 1, grid_size, dtype=int)
+    sampled_locations = [(x, y) for y in y_coords for x in x_coords]
+    
+    # 2. Extract patches for each sampled location at 3 scales
+    saliency_values = np.zeros((grid_size, grid_size))  # Initialize the saliency map
+    
+    for i, (x, y) in enumerate(sampled_locations):
+        patches = []
+        for size in patch_size:
+            half_h, half_w = size[0] // 2, size[1] // 2
+            patch = image[max(0, y - half_h):min(height, y + half_h),
+                          max(0, x - half_w):min(width, x + half_w)]
+            patch = torch.tensor(patch).float()  # Convert to tensor
+            
+            # Resize patch using PyTorch's interpolate
+            patch_tensor = patch.permute(2, 0, 1).unsqueeze(0)  # Shape: (1, C, H, W)
+            resized_patch = F.interpolate(patch_tensor, size=size, mode='bilinear', align_corners=False)
+            patches.append(resized_patch.squeeze(0).permute(1, 2, 0))  # Convert back to (H, W, C)
+        
+        # Convert patches to tensor and pass through the model
+        patches_tensor = torch.stack(patches).permute(0, 3, 1, 2).float().to(device)  # (N, C, H, W)
+        with torch.no_grad():
+            saliency_score = model(patches_tensor).cpu().numpy().mean()
+        
+        # Store the saliency value for this location
+        saliency_values[i // grid_size, i % grid_size] = saliency_score
+    
+    # 3. Rescale to the original image size using PyTorch's interpolate
+    saliency_map_tensor = torch.tensor(saliency_values).unsqueeze(0).unsqueeze(0).float().to(device)  # (1, 1, H, W)
+    saliency_map_resized = F.interpolate(saliency_map_tensor, size=(height, width), mode='bilinear', align_corners=False)
+    saliency_map = saliency_map_resized.squeeze().cpu().numpy()  # Convert back to numpy array
+
+    return saliency_map
 
 
 if __name__ == "__main__":

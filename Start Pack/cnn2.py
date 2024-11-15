@@ -289,7 +289,7 @@ class Trainer:
             val_accuracy = 0
             total_samples = 0
             for batch in self.val_loader:
-                images = batch['X'].to(self.device)  # Adjusted for batch structure with 'X' and 'y'
+                images = batch['X_400'].to(self.device)  # Adjusted for batch structure with 'X' and 'y'
                 labels = batch['y'].to(self.device)  # batch['y'] holds the ground truth labels
 
                 logits = self.model(images)
