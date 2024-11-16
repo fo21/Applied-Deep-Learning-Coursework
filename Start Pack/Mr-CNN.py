@@ -22,14 +22,13 @@ from pathlib import Path
 from dataset import MIT
 
 import numpy as np
-from skimage.transform import resize
 
 torch.backends.cudnn.benchmark = True
 
 parser = argparse.ArgumentParser(
     description="Train a MRCNN on MIT dataset",
     formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-)y
+)
 #default_dataset_dir = Path.home() / ".cache" / "torch" / "datasets"
 train_dataset_path = './train_data.pth.tar'
 val_dataset_path = './val_data.pth.tar'
@@ -143,24 +142,6 @@ def main(args):
     )
 
     summary_writer.close()
-
-class CustomDataset(Dataset):
-    def __init__(self, data_list):
-        self.data_list = data_list  # This should be your list of dictionaries
-
-    def __len__(self):
-        # Returns the number of samples in the dataset
-        return len(self.data_list)
-
-    def __getitem__(self, idx):
-        # Fetch the dictionary at index `idx`
-        sample = self.data_list[idx]
-        
-        # Ensure each field in the dictionary is a tensor for easier batching
-        sample = {key: torch.tensor(value) if not isinstance(value, torch.Tensor) else value 
-                  for key, value in sample.items()}
-        
-        return sample
 
 class MrCNN(nn.Module):
     def __init__(self, input_channels=3, output_classes=1):
