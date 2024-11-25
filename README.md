@@ -15,7 +15,7 @@ Applied-Deep-Learning-Coursework 2024 Brief [here](https://uob-my.sharepoint.com
 
 </details>
 
-## Learning Objectives
+## ADL labs
 Go to ADL labs using this [link](https://github.com/COMSM0045-Applied-Deep-Learning/labsheets?tab=readme-ov-file)
 
 ## Work Tracker
@@ -23,3 +23,6 @@ Keep track of work progress using this [Workbook](https://docs.google.com/spread
 
 ## Report
 Link to Overleaf report [here](https://www.overleaf.com/project/672f4cda430619b4cccca15b)
+
+## Google Colab
+Colab notebook [here](https://colab.research.google.com/drive/1xsenA-O8PpKFJ_6bxUDueLD5ElmjcVAs?usp=sharing)
