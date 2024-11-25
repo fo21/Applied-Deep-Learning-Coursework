@@ -16,7 +16,7 @@ from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from torchvision import transforms
 import torchvision.io as io
-from torch.optim import StepLR
+from torch.optim.lr_scheduler import StepLR
 
 import argparse
 from pathlib import Path
