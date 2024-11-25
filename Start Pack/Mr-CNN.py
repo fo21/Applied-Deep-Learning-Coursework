@@ -16,6 +16,7 @@ from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from torchvision import transforms
 import torchvision.io as io
+from torch.optim import StepLR
 
 import argparse
 from pathlib import Path
@@ -37,10 +38,10 @@ val_dataset_path = './val_data.pth.tar'
 test_dataset_path = './test_data.pth.tar'
 #parser.add_argument("--dataset-root", default=default_dataset_dir)
 parser.add_argument("--log-dir", default=Path("logs"), type=Path)
-parser.add_argument("--learning-rate", default=1e-2, type=float, help="Learning rate")
+parser.add_argument("--learning-rate", default=2e-3, type=float, help="Learning rate") #learning rate set to 0.002
 parser.add_argument(
     "--batch-size",
-    default=128,
+    default=256, #specified in the paper to choose 256 bath size for MIT
     type=int,
     help="Number of images within each mini-batch",
 )
@@ -52,9 +53,9 @@ parser.add_argument(
 )
 parser.add_argument(
     "--val-frequency",
-    default=2,
+    default=200, #originally set to 2
     type=int,
-    help="How frequently to test the model on the validation set in number of epochs",
+    help="How frequently to test the model on the validation set in number of steps", #originally measure number of epochs
 )
 parser.add_argument(
     "--log-frequency",
@@ -76,7 +77,6 @@ parser.add_argument(
     help="Number of worker processes used to load data.",
 )
 
-
 class ImageShape(NamedTuple):
     height: int
     width: int
@@ -94,7 +94,10 @@ else:
     print("Device detected is cpu")
 
 def main(args):
-    transform = transforms.ToTensor()
+    transform = transforms.Compose([
+        transforms.RandomHorizontalFlip(p=0.5),
+        #transforms.ToTensor(),
+    ])
     #args.dataset_root.mkdir(parents=True, exist_ok=True)
     train_dataset = MIT(dataset_path=train_dataset_path)
     test_dataset = MIT(dataset_path=test_dataset_path)
@@ -124,11 +127,11 @@ def main(args):
 
     model = MrCNN(input_channels=3, output_classes=1)
 
-    ## TASK 8: Redefine the criterion to be softmax cross entropy
     criterion = nn.CrossEntropyLoss()
 
-    ## TASK 11: Define the optimizer
-    optimizer = torch.optim.SGD(model.parameters(), lr=args.learning_rate)
+    optimizer = torch.optim.SGD(model.parameters(), lr=args.learning_rate, momentum = 0.9)
+
+    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=5000, gamma=0.1)
 
     log_dir = get_summary_writer_log_dir(args)
     print(f"Writing logs to {log_dir}")
@@ -138,7 +141,7 @@ def main(args):
     )
     print("begin training")
     trainer = Trainer(
-        model, train_loader, val_loader, criterion, optimizer, summary_writer, DEVICE
+        model, train_loader, val_loader, criterion, optimizer, summary_writer, DEVICE, scheduler, transform
     )
 
     trainer.train(
@@ -153,6 +156,7 @@ def main(args):
 class MrCNN(nn.Module):
     def __init__(self, input_channels=3, output_classes=1):
         super(MrCNN, self).__init__()
+        self.dropout = nn.Dropout(p = 0.5)
 
         # Define one set of convolutional layers to be shared across all three streams
         self.shared_conv1 = nn.Conv2d(input_channels, 96, kernel_size=7, stride=1)
@@ -178,10 +182,13 @@ class MrCNN(nn.Module):
         x = self.pool(x)
         x = F.relu(self.shared_conv3(x))
         x = self.pool(x)
+        x = self.dropout(x)
 
         # Flatten and pass through FC layer for each stream
         x = self.flatten(x)
         x = F.relu(self.fc1(x))
+        x = self.dropout(x)
+
         return x
 
     def forward(self, x):
@@ -198,6 +205,8 @@ class MrCNN(nn.Module):
 
         # Pass through fusion and output layers
         fusion_out = F.relu(self.fusion_fc(combined))
+        fusion_out = self.dropout(fusion_out)
+
         output = torch.sigmoid(self.output_layer(fusion_out)).squeeze(1)  # Use sigmoid for binary classification
 
         return output
@@ -212,6 +221,8 @@ class Trainer:
         optimizer: Optimizer,
         summary_writer: SummaryWriter,
         device: torch.device,
+        scheduler: torch.optim.lr_scheduler.StepLR,
+        transform: transforms.Compose
     ):
         self.model = model.to(device)
         self.device = device
@@ -221,6 +232,8 @@ class Trainer:
         self.optimizer = optimizer
         self.summary_writer = summary_writer
         self.step = 0
+        self.scheduler = scheduler
+        self.transform = transform
 
     def train(
         self,
@@ -261,13 +274,44 @@ class Trainer:
 
                 self.step += 1
                 data_load_start_time = time.time()
+                
+                #data augumentation
+                batch = self.transform(batch).to(self.device)
+                label = label.to(self.device).float()
+                data_load_end_time = time.time()
+                logits = self.model.forward(batch)
+                loss = self.criterion(logits, label)
+                #print(f"Epoch [{epoch + 1}/{epochs}], Batch Loss: {loss.item()}")
+
+                loss.backward()
+                ## TASK 12: Step the optimizer and then zero out the gradient buffers.
+                self.optimizer.step()
+                self.optimizer.zero_grad()
+
+                with torch.no_grad():
+                    preds = torch.sigmoid(logits).round()
+                    #print(f"label: {label}, pred: {preds}")
+                    accuracy = compute_accuracy(label, preds)
+
+                data_load_time = data_load_end_time - data_load_start_time
+                step_time = time.time() - data_load_end_time
+                if ((self.step + 1) % log_frequency) == 0:
+                    self.log_metrics(epoch, accuracy, loss, data_load_time, step_time)
+                if ((self.step + 1) % print_frequency) == 0:
+                    self.print_metrics(epoch, accuracy, loss, data_load_time, step_time)
+
+                self.step += 1
+                data_load_start_time = time.time()
+
 
             self.summary_writer.add_scalar("epoch", epoch, self.step)
-            if ((epoch + 1) % val_frequency) == 0:
+            if ((self.step + 1) % val_frequency) == 0: #originally if ((epoch + 1) % val_frequency) == 0 but need to check val every 200 steps
                 self.validate()
                 # self.validate() will put the model in validation mode,
                 # so we have to switch back to train mode afterwards
                 self.model.train()
+
+            self.scheduler.step() # used for learning rate decay 
 
     def print_metrics(self, epoch, accuracy, loss, data_load_time, step_time):
         epoch_step = self.step % len(self.train_loader)
@@ -307,7 +351,7 @@ class Trainer:
         self.model.eval()
 
         with torch.no_grad():  # No gradient computation needed for validation
-          for idx, (batch, labels) in enumerate(self.val_loader):
+          for idx, (batch, _) in enumerate(self.val_loader):
               print(f"Validation {idx}/100 complete")
 
               batch = batch.to(self.device)
@@ -333,11 +377,10 @@ class Trainer:
               # Extract ground truth fixation map
               gt_path = f"ALLFIXATIONMAPS/{filename}_fixMap.jpg"
               gt_fixation_map = io.read_image(gt_path)  # Returns a tensor with shape (channels, height, width)
-
+              
               #Move saliency map and fixation map to cpu
               saliency_map = saliency_map.cpu().numpy()
               gt_fixation_map = gt_fixation_map.cpu().numpy()
-
 
               # Store predictions and targets in dictionaries
               preds[filename] = saliency_map
@@ -381,7 +424,7 @@ def get_summary_writer_log_dir(args: argparse.Namespace) -> str:
         from getting logged to the same TB log directory (which you can't easily
         untangle in TB).
     """
-    tb_log_dir_prefix = f'CNN_bs={args.batch_size}_lr={args.learning_rate}_run_'
+    tb_log_dir_prefix = f'CNN_bs={args.batch_size}_lr={args.learning_rate}_momentum=0.9_stepLR_run_'
     i = 0
     while i < 1000:
         tb_log_dir = args.log_dir / (tb_log_dir_prefix + str(i))
