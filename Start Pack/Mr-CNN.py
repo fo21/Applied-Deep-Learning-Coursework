@@ -15,11 +15,13 @@ from torch.optim.optimizer import Optimizer
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from torchvision import transforms
+import torchvision.io as io
 
 import argparse
 from pathlib import Path
 
-from dataset import MIT
+from dataset import MIT, crop_to_region
+from metrics import calculate_auc
 
 import numpy as np
 
@@ -110,7 +112,7 @@ def main(args):
     val_loader = torch.utils.data.DataLoader(
         val_dataset,
         shuffle=False,
-        batch_size=args.batch_size,
+        batch_size=2500,  #originally: args.batch_size,
         num_workers=args.worker_count,
         pin_memory=True,
     )
@@ -131,7 +133,7 @@ def main(args):
             flush_secs=5
     )
     trainer = Trainer(
-        model, train_loader, test_loader, criterion, optimizer, summary_writer, DEVICE
+        model, train_loader, val_loader, criterion, optimizer, summary_writer, DEVICE
     )
 
     trainer.train(
@@ -151,7 +153,7 @@ class MrCNN(nn.Module):
         self.shared_conv1 = nn.Conv2d(input_channels, 96, kernel_size=7, stride=1)
         self.shared_conv2 = nn.Conv2d(96, 160, kernel_size=3, stride=1)
         self.shared_conv3 = nn.Conv2d(160, 288, kernel_size=3, stride=1)
-        
+
         # Define the pooling and FC layers for each stream
         self.pool = nn.MaxPool2d(2, 2)
         self.flatten = nn.Flatten()
@@ -171,7 +173,7 @@ class MrCNN(nn.Module):
         x = self.pool(x)
         x = F.relu(self.shared_conv3(x))
         x = self.pool(x)
-        
+
         # Flatten and pass through FC layer for each stream
         x = self.flatten(x)
         x = F.relu(self.fc1(x))
@@ -180,7 +182,7 @@ class MrCNN(nn.Module):
     def forward(self, x):
         # Split input into three crops for each stream
         crop1, crop2, crop3 = x[:, 0], x[:, 1], x[:, 2]  # Assuming x has shape [batch_size, 3, 3, 42, 42]
-        
+
         # Pass each crop through the shared convolutional layers independently
         stream1_out = self.forward_stream(crop1)
         stream2_out = self.forward_stream(crop2)
@@ -228,31 +230,18 @@ class Trainer:
             self.model.train()
             data_load_start_time = time.time()
             for batch,label in self.train_loader:
-                batch = batch.to(self.device)       
-                label = label.to(self.device).float() 
+                batch = batch.to(self.device)
+                label = label.to(self.device).float()
                 data_load_end_time = time.time()
-
-
-                ## TASK 1: Compute the forward pass of the model, print the output shape
-                ##         and quit the program
-                #output =
-                #output = self.model.forward(batch)
-                #print(output.shape)
-                #import sys; sys.exit(1)
-                ## TASK 7: Rename `output` to `logits`, remove the output shape printing
-                ##         and get rid of the `import sys; sys.exit(1)`
                 logits = self.model.forward(batch)
-                #print(f"logits: {logits}")
-                ## TASK 9: Compute the loss using self.criterion and
-                ##         store it in a variable called `loss`
                 loss = self.criterion(logits, label)
                 #print(f"Epoch [{epoch + 1}/{epochs}], Batch Loss: {loss.item()}")
-                ## TASK 10: Compute the backward pass
+
                 loss.backward()
                 ## TASK 12: Step the optimizer and then zero out the gradient buffers.
                 self.optimizer.step()
                 self.optimizer.zero_grad()
-                
+
                 with torch.no_grad():
                     preds = torch.sigmoid(logits).round()
                     #print(f"label: {label}, pred: {preds}")
@@ -307,60 +296,57 @@ class Trainer:
         )
 
     def validate(self):
-        results = {"preds": [], "labels": []}
-        total_loss = 0
+        preds = {}
+        targets = {}
+
         self.model.eval()
-        
-        # No need to track gradients for validation, we're not optimizing.
-        with torch.no_grad():
-            print(f"length of val loader: {len(self.val_loader)}")
-            for batch, labels in self.val_loader:
-                batch = batch.to(self.device)
-                labels = labels.to(self.device).float() #need to compute labels
 
-                # 1. Generate saliency map for each image in the batch
-                saliency_maps = []
-                for img in batch:
-                    saliency_map = calculate_saliency_map(img.cpu().numpy(), self.model)
-                    saliency_maps.append(saliency_map)
-                saliency_maps = np.array(saliency_maps)  # Shape: (batch_size, H, W)
+        with torch.no_grad():  # No gradient computation needed for validation
+          for idx, (batch, labels) in enumerate(self.val_loader):
+              print(f"Validation {idx}/100 complete")
 
-                # 2. Generate binary labels for each pixel based on saliency map
-                # For simplicity, we threshold the saliency map at 0.5 to generate binary labels
-                # Adjust this threshold as per your requirement.
-                saliency_labels = (saliency_maps > 0.5).astype(float)
-                
-                logits = self.model(batch)
-                #print(f"Predictions inside validation: {logits.size()}")
-                loss = self.criterion(logits, labels)
-                total_loss += loss.item()
-                preds = torch.sigmoid(logits).round()
+              batch = batch.to(self.device)
+              logits = self.model(batch)  # Output shape: [2500]
 
-                # Ensure preds and labels are iterable
-                if preds.dim() == 0:  # If preds is a scalar, make it a list
-                    preds = preds.unsqueeze(0)
+              # Get original image height and width
+              height, width = self.val_loader.dataset.dataset[idx]['X'].shape[1], self.val_loader.dataset.dataset[idx]['X'].shape[2]
 
-                # Extend results with the batch predictions and labels
-                results["preds"].extend(preds.view(-1).cpu().tolist())  # Flatten preds to 1D list
-                results["labels"].extend(labels.view(-1).cpu().numpy().tolist())  # Flatten labels to 1D list
-                
+              # Reshape logits to down-sampled saliency map
+              down_sampled_saliency_map = logits.reshape(50, 50)
 
-        accuracy = compute_accuracy(
-            np.array(results["labels"]), np.array(results["preds"])
-        )
-        average_loss = total_loss / len(self.val_loader)
+              # Interpolate to match original image size
+              saliency_map = F.interpolate(
+                  down_sampled_saliency_map.unsqueeze(0).unsqueeze(0),  # Add batch and channel dimensions: [1, 1, 50, 50]
+                  size=(height, width),  # Target height and width
+                  mode="bilinear",  # Interpolation method
+                  align_corners=False
+              ).squeeze(0).squeeze(0)  # Remove batch and channel dimensions: [h, w]
+
+              # File name extraction
+              filename = self.val_loader.dataset.dataset[idx]['file'][:-5]
+
+              # Extract ground truth fixation map
+              gt_path = f"ALLFIXATIONMAPS/{filename}_fixMap.jpg"
+              gt_fixation_map = io.read_image(gt_path)  # Returns a tensor with shape (channels, height, width)
+
+              #Move saliency map and fixation map to cpu
+              saliency_map = saliency_map.cpu().numpy()
+              gt_fixation_map = gt_fixation_map.cpu().numpy()
+
+
+              # Store predictions and targets in dictionaries
+              preds[filename] = saliency_map
+              targets[filename] = gt_fixation_map
+
+        AUC = calculate_auc(preds, targets)
 
         self.summary_writer.add_scalars(
-                "accuracy",
-                {"test": accuracy},
+                "AUC",
+                {"test": AUC},
                 self.step
         )
-        self.summary_writer.add_scalars(
-                "loss",
-                {"test": average_loss},
-                self.step
-        )
-        print(f"validation loss: {average_loss:.5f}, accuracy: {accuracy * 100:2.2f}")
+
+        print(f"validation AUC: {AUC}")
 
 def compute_accuracy(labels, preds):
     # Ensure labels and preds are tensors
@@ -398,58 +384,6 @@ def get_summary_writer_log_dir(args: argparse.Namespace) -> str:
             return str(tb_log_dir)
         i += 1
     return str(tb_log_dir)
-
-
-def calculate_saliency_map(image, model, grid_size=50, patch_size=[(150, 150), (250, 250), (400, 400)]):
-    """
-    Calculate the saliency map for a given image using the trained Mr-CNN model.
-    
-    Args:
-        image: Input image (H, W, C) in numpy format.
-        model: Trained Mr-CNN model.
-        grid_size: Number of locations sampled along each axis (default 50x50 grid).
-        patch_size: List of patch sizes to be resized to for processing.
-        
-    Returns:
-        saliency_map: Final saliency map resized to the original image size.
-    """
-    # 1. Prepare the down-sampled grid of locations
-    height, width = image.shape[:2]
-    x_coords = np.linspace(0, width - 1, grid_size, dtype=int)
-    y_coords = np.linspace(0, height - 1, grid_size, dtype=int)
-    sampled_locations = [(x, y) for y in y_coords for x in x_coords]
-    
-    # 2. Extract patches for each sampled location at 3 scales
-    saliency_values = np.zeros((grid_size, grid_size))  # Initialize the saliency map
-    
-    for i, (x, y) in enumerate(sampled_locations):
-        patches = []
-        for size in patch_size:
-            half_h, half_w = size[0] // 2, size[1] // 2
-            patch = image[max(0, y - half_h):min(height, y + half_h),
-                          max(0, x - half_w):min(width, x + half_w)]
-            patch = torch.tensor(patch).float()  # Convert to tensor
-            
-            # Resize patch using PyTorch's interpolate
-            patch_tensor = patch.permute(2, 0, 1).unsqueeze(0)  # Shape: (1, C, H, W)
-            resized_patch = F.interpolate(patch_tensor, size=size, mode='bilinear', align_corners=False)
-            patches.append(resized_patch.squeeze(0).permute(1, 2, 0))  # Convert back to (H, W, C)
-        
-        # Convert patches to tensor and pass through the model
-        patches_tensor = torch.stack(patches).permute(0, 3, 1, 2).float().to(device)  # (N, C, H, W)
-        with torch.no_grad():
-            saliency_score = model(patches_tensor).cpu().numpy().mean()
-        
-        # Store the saliency value for this location
-        saliency_values[i // grid_size, i % grid_size] = saliency_score
-    
-    # 3. Rescale to the original image size using PyTorch's interpolate
-    saliency_map_tensor = torch.tensor(saliency_values).unsqueeze(0).unsqueeze(0).float().to(device)  # (1, 1, H, W)
-    saliency_map_resized = F.interpolate(saliency_map_tensor, size=(height, width), mode='bilinear', align_corners=False)
-    saliency_map = saliency_map_resized.squeeze().cpu().numpy()  # Convert back to numpy array
-
-    return saliency_map
-
 
 if __name__ == "__main__":
     main(parser.parse_args())
