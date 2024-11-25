@@ -141,7 +141,7 @@ def main(args):
     )
     print("begin training")
     trainer = Trainer(
-        model, train_loader, val_loader, criterion, optimizer, summary_writer, DEVICE, scheduler, transform
+        model, train_loader, val_loader, criterion, optimizer, summary_writer, DEVICE, scheduler
     )
 
     trainer.train(
@@ -222,7 +222,6 @@ class Trainer:
         summary_writer: SummaryWriter,
         device: torch.device,
         scheduler: torch.optim.lr_scheduler.StepLR,
-        transform: transforms.Compose
     ):
         self.model = model.to(device)
         self.device = device
@@ -233,7 +232,6 @@ class Trainer:
         self.summary_writer = summary_writer
         self.step = 0
         self.scheduler = scheduler
-        self.transform = transform
 
     def train(
         self,
@@ -275,37 +273,9 @@ class Trainer:
                 self.step += 1
                 data_load_start_time = time.time()
                 
-                #data augumentation
-                batch = self.transform(batch).to(self.device)
-                label = label.to(self.device).float()
-                data_load_end_time = time.time()
-                logits = self.model.forward(batch)
-                loss = self.criterion(logits, label)
-                #print(f"Epoch [{epoch + 1}/{epochs}], Batch Loss: {loss.item()}")
-
-                loss.backward()
-                ## TASK 12: Step the optimizer and then zero out the gradient buffers.
-                self.optimizer.step()
-                self.optimizer.zero_grad()
-
-                with torch.no_grad():
-                    preds = logits > 0.9
-                    #print(f"label: {label}, pred: {preds}")
-                    accuracy = compute_accuracy(label, preds)
-
-                data_load_time = data_load_end_time - data_load_start_time
-                step_time = time.time() - data_load_end_time
-                if ((epoch + 1) % log_frequency) == 0:
-                    self.log_metrics(epoch, accuracy, loss, data_load_time, step_time)
-                if ((self.step + 1) % print_frequency) == 0:
-                    self.print_metrics(epoch, accuracy, loss, data_load_time, step_time)
-
-                self.step += 1
-                data_load_start_time = time.time()
-
 
             self.summary_writer.add_scalar("epoch", epoch, self.step)
-            if ((epoch + 1) % val_frequency) == 0: #originally if ((epoch + 1) % val_frequency) == 0 but need to check val every 200 steps
+            if ((epoch + 1) % val_frequency) == 0: 
                 self.validate()
                 # self.validate() will put the model in validation mode,
                 # so we have to switch back to train mode afterwards
@@ -383,8 +353,8 @@ class Trainer:
               #-----------------------
               gt = gt_fixation_map[0] / 255
               gt = gt.squeeze(0)
-              saliency_map = saliency_map.to(self.device)
-              gt = gt.to(self.device)
+              saliency_map = saliency_map.cpu()
+              #gt = gt.to(self.device)
               gt = gt.round().long()
 
               loss = self.criterion(saliency_map, gt)
@@ -395,7 +365,7 @@ class Trainer:
               #-----------------------
 
               #Move saliency map and fixation map to cpu
-              saliency_map = saliency_map.cpu().numpy()
+              saliency_map = saliency_map.numpy()
               gt_fixation_map = gt_fixation_map.cpu().numpy()
 
               # Store predictions and targets in dictionaries
@@ -427,19 +397,10 @@ class Trainer:
         print(f"validation AUC: {AUC}, average_loss{average_loss}, average_accuracy{average_accuracy}")
 
 def compute_accuracy(labels, preds):
-    # Ensure labels and preds are tensors
-    labels = torch.tensor(labels) if not isinstance(labels, torch.Tensor) else labels
-    preds = torch.tensor(preds) if not isinstance(preds, torch.Tensor) else preds
-
-    # Check if labels and preds are in the correct shape (should be 1D)
-    if labels.dim() == 1 and preds.dim() == 1:  # Ensure labels and preds are 1D
-        total = labels.size(0)  # Get the batch size
-        correct = (labels == preds).sum().item()  # Count the number of correct predictions
-        accuracy = correct / total  # Calculate accuracy
-    else:
-        # Handle unexpected dimensions (e.g., multi-dimensional labels)
-        raise ValueError("Labels and predictions must be 1D tensors.")
-
+    total = labels.size(0) 
+    correct = (labels == preds).sum().item()  
+    accuracy = correct / total 
+    
     return accuracy
 
 def get_summary_writer_log_dir(args: argparse.Namespace) -> str:
