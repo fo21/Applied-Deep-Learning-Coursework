@@ -53,9 +53,9 @@ parser.add_argument(
 )
 parser.add_argument(
     "--val-frequency",
-    default=200, #originally set to 2
+    default=2, #originally set to 2
     type=int,
-    help="How frequently to test the model on the validation set in number of steps", #originally measure number of epochs
+    help="How frequently to test the model on the validation set in number of epochs", 
 )
 parser.add_argument(
     "--log-frequency",
@@ -261,7 +261,7 @@ class Trainer:
                 self.optimizer.zero_grad()
 
                 with torch.no_grad():
-                    preds = torch.sigmoid(logits).round()
+                    preds = logits > 0.9
                     #print(f"label: {label}, pred: {preds}")
                     accuracy = compute_accuracy(label, preds)
 
@@ -289,13 +289,13 @@ class Trainer:
                 self.optimizer.zero_grad()
 
                 with torch.no_grad():
-                    preds = torch.sigmoid(logits).round()
+                    preds = logits > 0.9
                     #print(f"label: {label}, pred: {preds}")
                     accuracy = compute_accuracy(label, preds)
 
                 data_load_time = data_load_end_time - data_load_start_time
                 step_time = time.time() - data_load_end_time
-                if ((self.step + 1) % log_frequency) == 0:
+                if ((epoch + 1) % log_frequency) == 0:
                     self.log_metrics(epoch, accuracy, loss, data_load_time, step_time)
                 if ((self.step + 1) % print_frequency) == 0:
                     self.print_metrics(epoch, accuracy, loss, data_load_time, step_time)
@@ -305,7 +305,7 @@ class Trainer:
 
 
             self.summary_writer.add_scalar("epoch", epoch, self.step)
-            if ((self.step + 1) % val_frequency) == 0: #originally if ((epoch + 1) % val_frequency) == 0 but need to check val every 200 steps
+            if ((epoch + 1) % val_frequency) == 0: #originally if ((epoch + 1) % val_frequency) == 0 but need to check val every 200 steps
                 self.validate()
                 # self.validate() will put the model in validation mode,
                 # so we have to switch back to train mode afterwards
@@ -347,6 +347,8 @@ class Trainer:
     def validate(self):
         preds = {}
         targets = {}
+        total_loss = 0
+        total_equal_count = 0
 
         self.model.eval()
 
@@ -378,6 +380,15 @@ class Trainer:
               gt_path = f"ALLFIXATIONMAPS/{filename}_fixMap.jpg"
               gt_fixation_map = io.read_image(gt_path)  # Returns a tensor with shape (channels, height, width)
               
+              #-----------------------
+              gt = gt_fixation_map / 255
+              loss = self.criterion(saliency_map, gt)
+              total_loss += loss.item()
+
+              equal_elements = (gt == saliency_map).sum().item()
+              total_equal_count += equal_elements
+              #-----------------------
+
               #Move saliency map and fixation map to cpu
               saliency_map = saliency_map.cpu().numpy()
               gt_fixation_map = gt_fixation_map.cpu().numpy()
@@ -386,6 +397,20 @@ class Trainer:
               preds[filename] = saliency_map
               targets[filename] = gt_fixation_map
 
+        average_accuracy = total_equal_count / len(self.val_loader)
+
+        average_loss = total_loss / len(self.val_loader)
+
+        self.summary_writer.add_scalars(
+                "loss",
+                {"test": average_loss},
+                self.step
+        )
+        self.summary_writer.add_scalars(
+                "aberage accuracy",
+                {"test": average_accuracy},
+                self.step
+        )
         AUC = calculate_auc(preds, targets)
 
         self.summary_writer.add_scalars(
@@ -394,7 +419,7 @@ class Trainer:
                 self.step
         )
 
-        print(f"validation AUC: {AUC}")
+        print(f"validation AUC: {AUC}, average_loss{average_loss}, average_accuracy{average_accuracy}")
 
 def compute_accuracy(labels, preds):
     # Ensure labels and preds are tensors
