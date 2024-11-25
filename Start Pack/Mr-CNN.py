@@ -356,7 +356,7 @@ class Trainer:
 
                 # Ensure that both saliency_map and gt are on the same device
                 saliency_map = saliency_map.to(self.device)
-                gt = gt.to(self.device).round().long()  # Convert to Long type and round for classification
+                gt = gt.to(self.device).round()  # Convert to Long type and round for classification
 
                 # Calculate loss
                 loss = self.criterion(saliency_map, gt)  # Use the correct criterion
