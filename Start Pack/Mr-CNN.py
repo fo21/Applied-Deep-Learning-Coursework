@@ -85,9 +85,13 @@ class ImageShape(NamedTuple):
 
 if torch.cuda.is_available():
     DEVICE = torch.device("cuda")
+    print("I am using cuda")
+    print(f"Should print True if CUDA is available{torch.cuda.is_available()}")  # Should print True if CUDA is available
+    print(f"Number of GPUS: {torch.cuda.device_count()}")  #  Should print the number of GPUs available
+    print(f"print name of first device: {torch.cuda.get_device_name(0)}")  # Print the name of the first GPU
 else:
     DEVICE = torch.device("cpu")
-
+    print("Device detected is cpu")
 
 def main(args):
     transform = transforms.ToTensor()
@@ -132,6 +136,7 @@ def main(args):
             str(log_dir),
             flush_secs=5
     )
+    print("begin training")
     trainer = Trainer(
         model, train_loader, val_loader, criterion, optimizer, summary_writer, DEVICE
     )
