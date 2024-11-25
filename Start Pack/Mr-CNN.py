@@ -323,54 +323,57 @@ class Trainer:
         self.model.eval()
 
         with torch.no_grad():  # No gradient computation needed for validation
-          for idx, (batch, _) in enumerate(self.val_loader):
-              print(f"Validation {idx}/100 complete")
+            for idx, (batch, _) in enumerate(self.val_loader):
+                print(f"Validation {idx}/100 complete")
 
-              batch = batch.to(self.device)
-              logits = self.model(batch)  # Output shape: [2500]
+                batch = batch.to(self.device)  # Move batch to device
+                logits = self.model(batch)  # Output shape: [2500]
 
-              # Get original image height and width
-              height, width = self.val_loader.dataset.dataset[idx]['X'].shape[1], self.val_loader.dataset.dataset[idx]['X'].shape[2]
+                # Get original image height and width
+                height, width = self.val_loader.dataset.dataset[idx]['X'].shape[1], self.val_loader.dataset.dataset[idx]['X'].shape[2]
 
-              # Reshape logits to down-sampled saliency map
-              down_sampled_saliency_map = logits.reshape(50, 50)
+                # Reshape logits to down-sampled saliency map
+                down_sampled_saliency_map = logits.reshape(50, 50)
 
-              # Interpolate to match original image size
-              saliency_map = F.interpolate(
-                  down_sampled_saliency_map.unsqueeze(0).unsqueeze(0),  # Add batch and channel dimensions: [1, 1, 50, 50]
-                  size=(height, width),  # Target height and width
-                  mode="bilinear",  # Interpolation method
-                  align_corners=False
-              ).squeeze(0).squeeze(0)  # Remove batch and channel dimensions: [h, w]
+                # Interpolate to match original image size
+                saliency_map = F.interpolate(
+                    down_sampled_saliency_map.unsqueeze(0).unsqueeze(0),  # Add batch and channel dimensions: [1, 1, 50, 50]
+                    size=(height, width),  # Target height and width
+                    mode="bilinear",  # Interpolation method
+                    align_corners=False
+                ).squeeze(0).squeeze(0)  # Remove batch and channel dimensions: [h, w]
 
-              # File name extraction
-              filename = self.val_loader.dataset.dataset[idx]['file'][:-5]
+                # File name extraction
+                filename = self.val_loader.dataset.dataset[idx]['file'][:-5]
 
-              # Extract ground truth fixation map
-              gt_path = f"ALLFIXATIONMAPS/{filename}_fixMap.jpg"
-              gt_fixation_map = io.read_image(gt_path)  # Returns a tensor with shape (channels, height, width)
-              
-              #-----------------------
-              gt = gt_fixation_map[0] / 255
-              gt = gt.squeeze(0)
-              saliency_map = saliency_map.cpu()
-              #gt = gt.to(self.device)
-              gt = gt.round().long()
+                # Extract ground truth fixation map
+                gt_path = f"ALLFIXATIONMAPS/{filename}_fixMap.jpg"
+                gt_fixation_map = io.read_image(gt_path)  # Returns a tensor with shape (channels, height, width)
 
-              loss = self.criterion(saliency_map, gt)
-              total_loss += loss.item()
+                #-----------------------
+                gt = gt_fixation_map[0] / 255.0  # Normalize ground truth (scale from 0 to 1)
+                gt = gt.squeeze(0)  # Remove channel dimension: [h, w]
 
-              equal_elements = (gt == saliency_map).sum().item()
-              total_equal_count += equal_elements
-              #-----------------------
+                # Ensure that both saliency_map and gt are on the same device
+                saliency_map = saliency_map.to(self.device)
+                gt = gt.to(self.device).round().long()  # Convert to Long type and round for classification
 
-              #Move saliency map and fixation map to cpu
-              saliency_map = saliency_map.numpy()
-              gt_fixation_map = gt_fixation_map.cpu().numpy()
+                # Calculate loss
+                loss = self.criterion(saliency_map, gt)  # Use the correct criterion
+                total_loss += loss.item()
 
-              # Store predictions and targets in dictionaries
-              preds[filename] = saliency_map
-              targets[filename] = gt_fixation_map
+                # Calculate accuracy (or element-wise comparison)
+                equal_elements = (gt == saliency_map).sum().item()  # Count the number of correct pixels
+                total_equal_count += equal_elements
+                #-----------------------
+
+                # Move saliency map and fixation map to CPU for storage
+                saliency_map = saliency_map.cpu().numpy()
+                gt_fixation_map = gt_fixation_map.cpu().numpy()
+
+                # Store predictions and targets in dictionaries
+                preds[filename] = saliency_map
+                targets[filename] = gt_fixation_map
 
         average_accuracy = total_equal_count / len(self.val_loader)
 
