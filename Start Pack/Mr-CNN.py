@@ -381,7 +381,9 @@ class Trainer:
               gt_fixation_map = io.read_image(gt_path)  # Returns a tensor with shape (channels, height, width)
               
               #-----------------------
-              gt = gt_fixation_map / 255
+              gt = gt_fixation_map[0] / 255
+              gt = gt.round().long()
+
               loss = self.criterion(saliency_map, gt)
               total_loss += loss.item()
 
