@@ -382,6 +382,9 @@ class Trainer:
               
               #-----------------------
               gt = gt_fixation_map / 255
+              gt = gt.squeeze(0)
+              saliency_map = saliency_map.to(self.device)
+              gt = gt.to(self.device)
               loss = self.criterion(saliency_map, gt)
               total_loss += loss.item()
 
