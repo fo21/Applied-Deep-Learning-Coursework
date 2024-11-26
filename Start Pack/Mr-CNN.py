@@ -332,6 +332,9 @@ class Trainer:
 
                 saliency_map = saliency_map.to(self.device)
                 gt = gt.to(self.device) 
+                
+                if saliency_map.shape != gt.shape:
+                    raise ValueError(f"Shape mismatch: saliency_map has shape {saliency_map.shape}, but gt has shape {gt.shape}.")
 
                 pair_wise_distance = torch.nn.PairwiseDistance(p=2.0,eps=1e-6,keepdim=False)
                 total_pair_wise_distance += pair_wise_distance(saliency_map, gt)
