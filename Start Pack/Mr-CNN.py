@@ -32,16 +32,16 @@ parser = argparse.ArgumentParser(
     description="Train a MRCNN on MIT dataset",
     formatter_class=argparse.ArgumentDefaultsHelpFormatter,
 )
-#default_dataset_dir = Path.home() / ".cache" / "torch" / "datasets"
+default_dataset_dir = Path.home() / ".cache" / "torch" / "datasets"
 train_dataset_path = './train_data.pth.tar'
 val_dataset_path = './val_data.pth.tar'
 test_dataset_path = './test_data.pth.tar'
-#parser.add_argument("--dataset-root", default=default_dataset_dir)
+parser.add_argument("--dataset-root", default=default_dataset_dir)
 parser.add_argument("--log-dir", default=Path("logs"), type=Path)
-parser.add_argument("--learning-rate", default=2e-3, type=float, help="Learning rate") #learning rate set to 0.002
+parser.add_argument("--learning-rate", default=2e-3, type=float, help="Learning rate") 
 parser.add_argument(
     "--batch-size",
-    default=256, #specified in the paper to choose 256 bath size for MIT
+    default=256,
     type=int,
     help="Number of images within each mini-batch",
 )
@@ -85,10 +85,6 @@ class ImageShape(NamedTuple):
 
 if torch.cuda.is_available():
     DEVICE = torch.device("cuda")
-    print("I am using cuda")
-    print(f"Should print True if CUDA is available{torch.cuda.is_available()}")  # Should print True if CUDA is available
-    print(f"Number of GPUS: {torch.cuda.device_count()}")  #  Should print the number of GPUs available
-    print(f"print name of first device: {torch.cuda.get_device_name(0)}")  # Print the name of the first GPU
 else:
     DEVICE = torch.device("cpu")
     print("Device detected is cpu")
@@ -98,7 +94,7 @@ def main(args):
         transforms.RandomHorizontalFlip(p=0.5),
         #transforms.ToTensor(),
     ])
-    #args.dataset_root.mkdir(parents=True, exist_ok=True)
+    args.dataset_root.mkdir(parents=True, exist_ok=True)
     train_dataset = MIT(dataset_path=train_dataset_path)
     test_dataset = MIT(dataset_path=test_dataset_path)
     val_dataset = MIT(dataset_path=val_dataset_path)
@@ -158,24 +154,19 @@ class MrCNN(nn.Module):
         super(MrCNN, self).__init__()
         self.dropout = nn.Dropout(p = 0.5)
 
-        # Define one set of convolutional layers to be shared across all three streams
         self.shared_conv1 = nn.Conv2d(input_channels, 96, kernel_size=7, stride=1)
         self.shared_conv2 = nn.Conv2d(96, 160, kernel_size=3, stride=1)
         self.shared_conv3 = nn.Conv2d(160, 288, kernel_size=3, stride=1)
 
-        # Define the pooling and FC layers for each stream
         self.pool = nn.MaxPool2d(2, 2)
         self.flatten = nn.Flatten()
-        self.fc1 = nn.Linear(288 * 3 * 3, 512)  # Output size from convolutional layers is 3x3 after pooling
+        self.fc1 = nn.Linear(288 * 3 * 3, 512)  
 
-        # Fusion layer after concatenating the three streams
         self.fusion_fc = nn.Linear(512 * 3, 512)
 
-        # Output layer for binary classification
         self.output_layer = nn.Linear(512, output_classes)
 
     def forward_stream(self, x):
-        # Pass through shared convolutional layers with pooling
         x = F.relu(self.shared_conv1(x))
         x = self.pool(x)
         x = F.relu(self.shared_conv2(x))
@@ -184,7 +175,6 @@ class MrCNN(nn.Module):
         x = self.pool(x)
         x = self.dropout(x)
 
-        # Flatten and pass through FC layer for each stream
         x = self.flatten(x)
         x = F.relu(self.fc1(x))
         x = self.dropout(x)
@@ -192,22 +182,19 @@ class MrCNN(nn.Module):
         return x
 
     def forward(self, x):
-        # Split input into three crops for each stream
-        crop1, crop2, crop3 = x[:, 0], x[:, 1], x[:, 2]  # Assuming x has shape [batch_size, 3, 3, 42, 42]
+      
+        crop1, crop2, crop3 = x[:, 0], x[:, 1], x[:, 2] 
 
-        # Pass each crop through the shared convolutional layers independently
         stream1_out = self.forward_stream(crop1)
         stream2_out = self.forward_stream(crop2)
         stream3_out = self.forward_stream(crop3)
 
-        # Concatenate outputs from the three streams
         combined = torch.cat((stream1_out, stream2_out, stream3_out), dim=1)
 
-        # Pass through fusion and output layers
         fusion_out = F.relu(self.fusion_fc(combined))
         fusion_out = self.dropout(fusion_out)
 
-        output = torch.sigmoid(self.output_layer(fusion_out)).squeeze(1)  # Use sigmoid for binary classification
+        output = torch.sigmoid(self.output_layer(fusion_out)).squeeze(1) 
 
         return output
 
@@ -251,16 +238,13 @@ class Trainer:
                 data_load_end_time = time.time()
                 logits = self.model.forward(batch)
                 loss = self.criterion(logits, label)
-                #print(f"Epoch [{epoch + 1}/{epochs}], Batch Loss: {loss.item()}")
 
                 loss.backward()
-                ## TASK 12: Step the optimizer and then zero out the gradient buffers.
                 self.optimizer.step()
                 self.optimizer.zero_grad()
 
                 with torch.no_grad():
                     preds = logits > 0.9
-                    #print(f"label: {label}, pred: {preds}")
                     accuracy = compute_accuracy(label, preds)
 
                 data_load_time = data_load_end_time - data_load_start_time
@@ -317,87 +301,62 @@ class Trainer:
     def validate(self):
         preds = {}
         targets = {}
-        total_loss = 0
-        total_equal_count = 0
-
+        total_pair_wise_distance = 0
         self.model.eval()
 
-        with torch.no_grad():  # No gradient computation needed for validation
+        with torch.no_grad():  
             for idx, (batch, _) in enumerate(self.val_loader):
-                print(f"Validation {idx}/100 complete")
+                print(f"Validation {idx} out of 100 complete")
 
-                batch = batch.to(self.device)  # Move batch to device
-                logits = self.model(batch)  # Output shape: [2500]
+                batch = batch.to(self.device) 
+                logits = self.model(batch)  
 
-                # Get original image height and width
                 height, width = self.val_loader.dataset.dataset[idx]['X'].shape[1], self.val_loader.dataset.dataset[idx]['X'].shape[2]
 
-                # Reshape logits to down-sampled saliency map
                 down_sampled_saliency_map = logits.reshape(50, 50)
 
-                # Interpolate to match original image size
                 saliency_map = F.interpolate(
-                    down_sampled_saliency_map.unsqueeze(0).unsqueeze(0),  # Add batch and channel dimensions: [1, 1, 50, 50]
-                    size=(height, width),  # Target height and width
-                    mode="bilinear",  # Interpolation method
+                    down_sampled_saliency_map.unsqueeze(0).unsqueeze(0), 
+                    size=(height, width), 
+                    mode="bilinear", 
                     align_corners=False
-                ).squeeze(0).squeeze(0)  # Remove batch and channel dimensions: [h, w]
+                ).squeeze(0).squeeze(0)  
 
-                # File name extraction
+            
                 filename = self.val_loader.dataset.dataset[idx]['file'][:-5]
 
-                # Extract ground truth fixation map
                 gt_path = f"ALLFIXATIONMAPS/{filename}_fixMap.jpg"
-                gt_fixation_map = io.read_image(gt_path)  # Returns a tensor with shape (channels, height, width)
+                gt_fixation_map = io.read_image(gt_path) 
 
                 #-----------------------
-                gt = gt_fixation_map[0] / 255.0  # Normalize ground truth (scale from 0 to 1)
-                gt = gt.squeeze(0)  # Remove channel dimension: [h, w]
+                gt = gt_fixation_map[0] / 255.0 
+                gt = gt.squeeze(0)  
 
-                # Ensure that both saliency_map and gt are on the same device
                 saliency_map = saliency_map.to(self.device)
-                gt = gt.to(self.device).round()  # Convert to Long type and round for classification
+                gt = gt.to(self.device) 
 
-                # Calculate loss
-                loss = self.criterion(saliency_map, gt)  # Use the correct criterion
-                total_loss += loss.item()
-
-                # Calculate accuracy (or element-wise comparison)
-                equal_elements = (gt == saliency_map).sum().item()  # Count the number of correct pixels
-                total_equal_count += equal_elements
+                pair_wise_distance = torch.nn.PairwiseDistance(p=2.0,eps=1e-6,keepdim=False)
+                total_pair_wise_distance += pair_wise_distance(saliency_map, gt)
                 #-----------------------
-
-                # Move saliency map and fixation map to CPU for storage
                 saliency_map = saliency_map.cpu().numpy()
                 gt_fixation_map = gt_fixation_map.cpu().numpy()
 
-                # Store predictions and targets in dictionaries
                 preds[filename] = saliency_map
                 targets[filename] = gt_fixation_map
 
-        average_accuracy = total_equal_count / len(self.val_loader)
-
-        average_loss = total_loss / len(self.val_loader)
-
+        average_pair_wise_distance = total_pair_wise_distance / 100
         self.summary_writer.add_scalars(
-                "loss",
-                {"test": average_loss},
-                self.step
-        )
-        self.summary_writer.add_scalars(
-                "aberage accuracy",
-                {"test": average_accuracy},
+                "pair wise distance",
+                {"validation": average_pair_wise_distance},
                 self.step
         )
         AUC = calculate_auc(preds, targets)
-
         self.summary_writer.add_scalars(
                 "AUC",
-                {"test": AUC},
+                {"validation": AUC},
                 self.step
         )
-
-        print(f"validation AUC: {AUC}, average_loss{average_loss}, average_accuracy{average_accuracy}")
+        print(f"validation AUC: {AUC}, average pair wise distance {average_pair_wise_distance}")
 
 def compute_accuracy(labels, preds):
     total = labels.size(0) 
