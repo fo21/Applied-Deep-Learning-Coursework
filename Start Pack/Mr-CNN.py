@@ -322,15 +322,13 @@ class Trainer:
                     align_corners=False
                 ).squeeze(0).squeeze(0)  
 
-            
                 filename = self.val_loader.dataset.dataset[idx]['file'][:-5]
 
                 gt_path = f"ALLFIXATIONMAPS/{filename}_fixMap.jpg"
                 gt_fixation_map = io.read_image(gt_path) 
-
                 #-----------------------
-                gt = gt_fixation_map[0] / 255.0 
-                gt = gt.squeeze(0)  
+                gt = gt_fixation_map.squeeze(0)  
+                gt = gt / 255.0 
 
                 saliency_map = saliency_map.to(self.device)
                 gt = gt.to(self.device) 
