@@ -327,11 +327,8 @@ class Trainer:
                 gt_path = f"ALLFIXATIONMAPS/{filename}_fixMap.jpg"
                 gt_fixation_map = io.read_image(gt_path) 
                 #-----------------------
-                gt = gt_fixation_map.squeeze(0)  
-                gt = gt / 255.0 
-
                 saliency_map = saliency_map.to(self.device)
-                gt = gt.to(self.device) 
+                gt_fixation_map = gt_fixation_map.to(self.device) 
 
                 pair_wise_distance = torch.nn.PairwiseDistance(p=2.0,eps=1e-6,keepdim=False)
                 total_pair_wise_distance += pair_wise_distance(saliency_map, gt)
