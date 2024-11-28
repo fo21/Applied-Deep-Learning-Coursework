@@ -331,7 +331,7 @@ class Trainer:
                 gt_fixation_map = gt_fixation_map.to(self.device) 
 
                 pair_wise_distance = torch.nn.PairwiseDistance(p=2.0,eps=1e-6,keepdim=False)
-                total_pair_wise_distance += pair_wise_distance(saliency_map, gt)
+                total_pair_wise_distance += pair_wise_distance(saliency_map, gt_fixation_map)
                 #-----------------------
                 saliency_map = saliency_map.cpu().numpy()
                 gt_fixation_map = gt_fixation_map.cpu().numpy()
