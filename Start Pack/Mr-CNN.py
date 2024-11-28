@@ -53,7 +53,7 @@ parser.add_argument(
 )
 parser.add_argument(
     "--val-frequency",
-    default=2, #originally set to 2
+    default=2, 
     type=int,
     help="How frequently to test the model on the validation set in number of epochs", 
 )
@@ -328,13 +328,10 @@ class Trainer:
                 sm_flatten = saliency_map.flatten()
                 gt_flatten = gt_fixation_map.squeeze(0).flatten()
                 print(f"accuracy per sm_flatten, gt_flatten: {compute_accuracy(sm_flatten,gt_flatten)}")
+                print(f"sm_flatten first 10 values: {sm_flatten[:10]}")
+                print(f"gt_flatten first 10 values: {gt_flatten[:10]}")
                 #-----------------------
-                saliency_map = saliency_map.to(self.device)
-                gt_fixation_map = gt_fixation_map.to(self.device) 
 
-                pair_wise_distance = torch.nn.PairwiseDistance(p=2.0,eps=1e-6,keepdim=False) #using pair wise distance as a "replacement" for loss
-                total_pair_wise_distance += pair_wise_distance(saliency_map, gt_fixation_map)
-                #-----------------------
                 saliency_map = saliency_map.cpu().numpy()
                 gt_fixation_map = gt_fixation_map.cpu().numpy()
 
@@ -361,6 +358,25 @@ def compute_accuracy(labels, preds):
     accuracy = correct / total 
     
     return accuracy
+
+def compute_statistics(labels, preds):
+    true_positives = 0
+    false_negatives = 0
+    true_negatives = 0
+    false_positives = 0
+
+    for (l,p) in zip(labels, preds):
+        if l == 1 and p == 1:
+            true_positives += 1
+        if l==1 and p==0:
+            false_negatives += 1
+        if l==0 and p == 0:
+            true_negatives+=1
+        if l==0 and p == 1:
+            false_positives += 1
+        
+    return (true_positives, true_negatives, false_positives, false_negatives)
+
 
 def get_summary_writer_log_dir(args: argparse.Namespace) -> str:
     """Get a unique directory that hasn't been logged to before for use with a TB
