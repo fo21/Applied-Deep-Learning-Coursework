@@ -87,7 +87,6 @@ if torch.cuda.is_available():
     DEVICE = torch.device("cuda")
 else:
     DEVICE = torch.device("cpu")
-    print("Device detected is cpu")
 
 def main(args):
     transform = transforms.Compose([
@@ -120,7 +119,6 @@ def main(args):
         pin_memory=True,
     )
     
-
     model = MrCNN(input_channels=3, output_classes=1)
 
     criterion = nn.CrossEntropyLoss()
@@ -135,7 +133,6 @@ def main(args):
             str(log_dir),
             flush_secs=5
     )
-    print("begin training")
     trainer = Trainer(
         model, train_loader, val_loader, criterion, optimizer, summary_writer, DEVICE, scheduler
     )
@@ -245,6 +242,7 @@ class Trainer:
 
                 with torch.no_grad():
                     preds = logits > 0.9
+                    preds = preds.int()
                     accuracy = compute_accuracy(label, preds)
 
                 data_load_time = data_load_end_time - data_load_start_time
@@ -306,32 +304,36 @@ class Trainer:
 
         with torch.no_grad():  
             for idx, (batch, _) in enumerate(self.val_loader):
-                print(f"Validation {idx} out of 100 complete")
+                batch = batch.to(self.device) #batch is a tensor of shape [2500 42 42 3 3] 
+                
+                logits = self.model(batch)  # logits has shape [2500] and holds 2500 predictions for each [42 42 3 3] tensor
 
-                batch = batch.to(self.device) 
-                logits = self.model(batch)  
+                #get original image height and width
+                height, width = self.val_loader.dataset.dataset[idx]['X'].shape[1], self.val_loader.dataset.dataset[idx]['X'].shape[2] 
 
-                height, width = self.val_loader.dataset.dataset[idx]['X'].shape[1], self.val_loader.dataset.dataset[idx]['X'].shape[2]
-
-                down_sampled_saliency_map = logits.reshape(50, 50)
+                down_sampled_saliency_map = logits.reshape(50, 50) #reshape logits to 50x50 
 
                 saliency_map = F.interpolate(
                     down_sampled_saliency_map.unsqueeze(0).unsqueeze(0), 
                     size=(height, width), 
                     mode="bilinear", 
                     align_corners=False
-                ).squeeze(0).squeeze(0)  
-
-                filename = self.val_loader.dataset.dataset[idx]['file'][:-5]
+                ).squeeze(0).squeeze(0)  #using interpolation to bring down sampled saliency map to original  img size
+                
+                filename = self.val_loader.dataset.dataset[idx]['file'][:-5] #prepare filename to extract ground truth fixation
 
                 gt_path = f"ALLFIXATIONMAPS/{filename}_fixMap.jpg"
                 gt_fixation_map = io.read_image(gt_path) 
+
+                sm_flatten = saliency_map.flatten()
+                gt_flatten = gt_fixation_map.squeeze(0).flatten()
+                print(f"accuracy per sm_flatten, gt_flatten: {compute_accuracy(sm_flatten,gt_flatten)}")
                 #-----------------------
                 saliency_map = saliency_map.to(self.device)
                 gt_fixation_map = gt_fixation_map.to(self.device) 
 
-                pair_wise_distance = torch.nn.PairwiseDistance(p=2.0,eps=1e-6,keepdim=False)
-                total_pair_wise_distance += pair_wise_distance(saliency_map, gt)
+                pair_wise_distance = torch.nn.PairwiseDistance(p=2.0,eps=1e-6,keepdim=False) #using pair wise distance as a "replacement" for loss
+                total_pair_wise_distance += pair_wise_distance(saliency_map, gt_fixation_map)
                 #-----------------------
                 saliency_map = saliency_map.cpu().numpy()
                 gt_fixation_map = gt_fixation_map.cpu().numpy()
