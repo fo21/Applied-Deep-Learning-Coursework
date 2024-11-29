@@ -258,8 +258,8 @@ class Trainer:
                 
             self.summary_writer.add_scalar("epoch", epoch, self.step)
             if ((epoch + 1) % val_frequency) == 0: 
-                self.validate()
                 print("call validate()")
+                self.validate()
                 # self.validate() will put the model in validation mode,
                 # so we have to switch back to train mode afterwards
                 self.model.train()
@@ -400,29 +400,23 @@ def compute_accuracy(labels, preds):
 
 def compute_precision(tp, fp):
     print("compute precision")
+    if tp + fp == 0:  # Avoid division by zero
+        return 0.0  # Or you can return a default value like None, depending on your needs
     precision = tp / (tp + fp)
     return precision
 
 def compute_sensitivity(tp, fn):
     print("compute sensitivity")
+    if tp + fn == 0:  # Avoid division by zero
+        return 0.0  # Or return None or any other default value
     sensitivity = tp / (tp + fn)
     return sensitivity
 
 def compute_statistics(labels, preds):
-    true_positives = 0
-    false_negatives = 0
-    true_negatives = 0
-    false_positives = 0
-
-    for (l,p) in zip(labels, preds):
-        if l == 1 and p == 1:
-            true_positives += 1
-        if l==1 and p==0:
-            false_negatives += 1
-        if l==0 and p == 0:
-            true_negatives+=1
-        if l==0 and p == 1:
-            false_positives += 1
+    true_positives = ((labels == 1) & (preds == 1)).sum().item()
+    false_negatives = ((labels == 1) & (preds == 0)).sum().item()
+    true_negatives = ((labels == 0) & (preds == 0)).sum().item()
+    false_positives = ((labels == 0) & (preds == 1)).sum().item()
         
     return (true_positives, true_negatives, false_positives, false_negatives)
 
