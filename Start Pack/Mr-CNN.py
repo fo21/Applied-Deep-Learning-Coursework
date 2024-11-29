@@ -230,13 +230,11 @@ class Trainer:
             self.model.train()
             data_load_start_time = time.time()
             for batch,labels in self.train_loader:
-                print(f"labels in training shape: {labels.shape}")
+                #print(f"labels in training shape: {labels.shape}")
                 batch = batch.to(self.device)
                 labels = labels.to(self.device).float()
                 data_load_end_time = time.time()
-                logits = self.model.forward(batch) #logits has a value between 0 and 1
-                logits = logits > 0.9 # and it needs to be either 0 or 1 (solution: threshold) 
-                logits = logits.int() # turn boolean tensor to int
+                logits = self.model.forward(batch) #logits has a value between 0 and 1 
                 loss = self.criterion(logits, labels)
 
                 loss.backward()
@@ -244,7 +242,8 @@ class Trainer:
                 self.optimizer.zero_grad()
 
                 with torch.no_grad():
-                    preds = logits
+                    preds = logits > 0.9
+                    preds = preds.int()
                     accuracy = compute_accuracy(labels, preds)
 
                 data_load_time = data_load_end_time - data_load_start_time
@@ -260,6 +259,7 @@ class Trainer:
             self.summary_writer.add_scalar("epoch", epoch, self.step)
             if ((epoch + 1) % val_frequency) == 0: 
                 self.validate()
+                print("call validate()")
                 # self.validate() will put the model in validation mode,
                 # so we have to switch back to train mode afterwards
                 self.model.train()
@@ -306,9 +306,10 @@ class Trainer:
         total_accuracy = 0
         total_precision = 0
         total_loss = 0
-        
+        print("entering val loop")
         with torch.no_grad():  
             for idx, (batch, _) in enumerate(self.val_loader):
+                print(f"in validation: {idx}")
                 batch = batch.to(self.device) # batch is a tensor of shape [2500 42 42 3 3] 
                 
                 logits = self.model(batch)  # logits has shape [2500] and holds predictions for each 2500 [42 42 3 3] tensors; (1 image -> 2500 predictions)
@@ -341,7 +342,9 @@ class Trainer:
                 total_sensitivity += sensitivity
                 total_accuracy += accuracy
                 total_precision += precision
-                loss = self.criterion(sm_flatten, gt_flatten)
+                print(f"shape gt_flat: {gt_flatten.shape} and {sm_flatten.shape}")
+                #gt_flat_long = gt_flatten.long()
+                loss = self.criterion(sm_flatten, gt_flatten.long())
                 total_loss += loss.item()
                 print(f"(per batch) saliency map[{idx}]: accuracy {accuracy}, precision: {precision}, sensitivity: {sensitivity}, loss: {loss.item()}")
                #-----------------------
@@ -388,6 +391,7 @@ class Trainer:
         
 
 def compute_accuracy(labels, preds):
+    #print("computing accuracy")
     total = labels.size(0) 
     correct = (labels == preds).sum().item()  
     accuracy = correct / total 
@@ -395,10 +399,12 @@ def compute_accuracy(labels, preds):
     return accuracy
 
 def compute_precision(tp, fp):
+    print("compute precision")
     precision = tp / (tp + fp)
     return precision
 
 def compute_sensitivity(tp, fn):
+    print("compute sensitivity")
     sensitivity = tp / (tp + fn)
     return sensitivity
 
