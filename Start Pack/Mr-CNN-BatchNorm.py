@@ -154,6 +154,7 @@ class MrCNN(nn.Module):
         self.BN2d_2 = nn.BatchNorm2d(160)
         self.BN2d_3 = nn.BatchNorm2d(288)
         self.BN1d = nn.BatchNorm1d(512)
+        self.BN1d_fusion = nn.BatchNorm1d(512)
 
         self.shared_conv1 = nn.Conv2d(input_channels, 96, kernel_size=7, stride=1)
         self.shared_conv2 = nn.Conv2d(96, 160, kernel_size=3, stride=1)
@@ -192,7 +193,7 @@ class MrCNN(nn.Module):
 
         combined = torch.cat((stream1_out, stream2_out, stream3_out), dim=1)
 
-        fusion_out = F.relu(self.fusion_fc(combined))
+        fusion_out = F.relu(self.BN1d_fusion(self.fusion_fc(combined)))
         fusion_out = self.dropout(fusion_out)
 
         output = torch.sigmoid(self.output_layer(fusion_out)).squeeze(1) 
