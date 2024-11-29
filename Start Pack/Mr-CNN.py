@@ -330,11 +330,17 @@ class Trainer:
                 sm_flatten = sm_flatten.int()
                 gt_flatten = gt_fixation_map.squeeze(0).flatten().to(self.device)
                 print(f"accuracy per sm_flatten, gt_flatten: {compute_accuracy(sm_flatten,gt_flatten)}")
+<<<<<<< HEAD
                # print(f"sm_flatten first 10 values: {sm_flatten[:10]}")
                
                #print(f"gt_flatten first 10 values: {gt_flatten[:10]}")
                 print(f"number of 1s in gt_flatten: {(gt_flatten == 1).sum().item()} and of 0s {(gt_flatten==0).sum().item()}")
                #-----------------------
+=======
+                print(f"sm_flatten first 10 values: {sm_flatten[:10]}")
+                print(f"gt_flatten first 10 values: {gt_flatten[:10]}")
+                #-----------------------
+>>>>>>> a5dcc593daa91ebb8f67288f9ced3e4b7a4ae7f8
 
                 saliency_map = saliency_map.cpu().numpy()
                 gt_fixation_map = gt_fixation_map.cpu().numpy()
