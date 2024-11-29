@@ -150,10 +150,10 @@ class MrCNN(nn.Module):
     def __init__(self, input_channels=3, output_classes=1):
         super(MrCNN, self).__init__()
         self.dropout = nn.Dropout(p = 0.5)
-        self.BN2d_1 = nn.BatchNorm2d(256) # default batch size
-        self.BN2d_2 = nn.BatchNorm2d(256)
-        self.BN2d_3 = nn.BatchNorm2d(256)
-        self.BN1d = nn.BatchNorm1d(256)
+        self.BN2d_1 = nn.BatchNorm2d(96) # default batch size
+        self.BN2d_2 = nn.BatchNorm2d(160)
+        self.BN2d_3 = nn.BatchNorm2d(288)
+        self.BN1d = nn.BatchNorm1d(512)
 
         self.shared_conv1 = nn.Conv2d(input_channels, 96, kernel_size=7, stride=1)
         self.shared_conv2 = nn.Conv2d(96, 160, kernel_size=3, stride=1)
@@ -266,7 +266,6 @@ class Trainer:
                 
             self.summary_writer.add_scalar("epoch", epoch, self.step)
             if ((epoch + 1) % val_frequency) == 0: 
-                print("call validate()")
                 self.validate()
                 # self.validate() will put the model in validation mode,
                 # so we have to switch back to train mode afterwards
@@ -362,11 +361,11 @@ class Trainer:
                 total_sensitivity += sensitivity
                 total_accuracy += accuracy
                 total_precision += precision
-                print(f"shape gt_flat: {gt_flatten.shape} and {sm_flatten.shape}")
+    
                 #gt_flat_long = gt_flatten.long()
                 #loss = self.criterion(sm_flatten_raw, gt_flatten.float())
                 #total_loss += loss.item()
-                print(f"(per batch) saliency map[{idx}]: accuracy {accuracy}, precision: {precision}, sensitivity: {sensitivity}")
+                #print(f"(per batch) saliency map[{idx}]: accuracy {accuracy}, precision: {precision}, sensitivity: {sensitivity}")
                #-----------------------
                 saliency_map = saliency_map.cpu().numpy()
                 gt_fixation_map = gt_fixation_map.cpu().numpy()
