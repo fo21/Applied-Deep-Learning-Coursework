@@ -245,13 +245,17 @@ class Trainer:
                     preds = logits > 0.9
                     preds = preds.int()
                     accuracy = compute_accuracy(labels, preds)
+                    tp,tn,fp,fn = compute_statistics(labels, preds)
+                    precision = compute_precision(tp,fp)
+                    sensitivity = compute_sensitivity(tp,fn)
+
 
                 data_load_time = data_load_end_time - data_load_start_time
                 step_time = time.time() - data_load_end_time
                 if ((self.step + 1) % log_frequency) == 0:
-                    self.log_metrics(epoch, accuracy, loss, data_load_time, step_time)
+                    self.log_metrics(epoch, accuracy, sensitivity, precision, loss, data_load_time, step_time)
                 if ((self.step + 1) % print_frequency) == 0:
-                    self.print_metrics(epoch, accuracy, loss, data_load_time, step_time)
+                    self.print_metrics(epoch, accuracy, sensitivity, precision,loss, data_load_time, step_time)
 
                 self.step += 1
                 data_load_start_time = time.time()
@@ -266,19 +270,21 @@ class Trainer:
 
             self.scheduler.step() # used for learning rate decay 
 
-    def print_metrics(self, epoch, accuracy, loss, data_load_time, step_time):
+    def print_metrics(self, epoch, accuracy,sensitivity,precision, loss, data_load_time, step_time):
         epoch_step = self.step % len(self.train_loader)
         print(
                 f"epoch: [{epoch}], "
                 f"step: [{epoch_step}/{len(self.train_loader)}], "
                 f"batch loss: {loss:.5f}, "
                 f"batch accuracy: {accuracy * 100:2.2f}, "
+                f"batch sensitivity: {sensitivity * 100:2.2f}, "
+                f"batch precision: {precision * 100:2.2f}, "
                 f"data load time: "
                 f"{data_load_time:.5f}, "
                 f"step time: {step_time:.5f}"
         )
 
-    def log_metrics(self, epoch, accuracy, loss, data_load_time, step_time):
+    def log_metrics(self, epoch, accuracy, sensitivity, precision, loss, data_load_time, step_time):
         self.summary_writer.add_scalar("epoch", epoch, self.step)
         self.summary_writer.add_scalars(
                 "accuracy",
@@ -288,6 +294,16 @@ class Trainer:
         self.summary_writer.add_scalars(
                 "loss",
                 {"train": float(loss.item())},
+                self.step
+        )
+        self.summary_writer.add_scalars(
+                "sensitivity",
+                {"train": sensitivity},
+                self.step
+        )
+        self.summary_writer.add_scalars(
+                "precision",
+                {"train": precision},
                 self.step
         )
         self.summary_writer.add_scalar(
@@ -306,10 +322,10 @@ class Trainer:
         total_accuracy = 0
         total_precision = 0
         total_loss = 0
-        print("entering val loop")
+        #print("entering val loop")
         with torch.no_grad():  
             for idx, (batch, _) in enumerate(self.val_loader):
-                print(f"in validation: {idx}")
+                #print(f"in validation: {idx}")
                 batch = batch.to(self.device) # batch is a tensor of shape [2500 42 42 3 3] 
                 
                 logits = self.model(batch)  # logits has shape [2500] and holds predictions for each 2500 [42 42 3 3] tensors; (1 image -> 2500 predictions)
@@ -338,15 +354,15 @@ class Trainer:
                 (tp, tn, fp, fn) = compute_statistics(gt_flatten, sm_flatten)
                 accuracy = compute_accuracy(gt_flatten,sm_flatten)
                 precision = compute_precision(tp, fp)
-                sensitivity = compute_sensitivity(tp,tn)
+                sensitivity = compute_sensitivity(tp,fn)
                 total_sensitivity += sensitivity
                 total_accuracy += accuracy
                 total_precision += precision
                 print(f"shape gt_flat: {gt_flatten.shape} and {sm_flatten.shape}")
                 #gt_flat_long = gt_flatten.long()
-                loss = self.criterion(sm_flatten_raw, gt_flatten.float())
-                total_loss += loss.item()
-                print(f"(per batch) saliency map[{idx}]: accuracy {accuracy}, precision: {precision}, sensitivity: {sensitivity}, loss: {loss.item()}")
+                #loss = self.criterion(sm_flatten_raw, gt_flatten.float())
+                #total_loss += loss.item()
+                print(f"(per batch) saliency map[{idx}]: accuracy {accuracy}, precision: {precision}, sensitivity: {sensitivity}")
                #-----------------------
                 saliency_map = saliency_map.cpu().numpy()
                 gt_fixation_map = gt_fixation_map.cpu().numpy()
@@ -399,14 +415,14 @@ def compute_accuracy(labels, preds):
     return accuracy
 
 def compute_precision(tp, fp):
-    print("compute precision")
+    #print("compute precision")
     if tp + fp == 0:  # Avoid division by zero
         return 0.0  # Or you can return a default value like None, depending on your needs
     precision = tp / (tp + fp)
     return precision
 
 def compute_sensitivity(tp, fn):
-    print("compute sensitivity")
+    #print("compute sensitivity")
     if tp + fn == 0:  # Avoid division by zero
         return 0.0  # Or return None or any other default value
     sensitivity = tp / (tp + fn)
