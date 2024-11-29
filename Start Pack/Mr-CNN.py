@@ -229,21 +229,23 @@ class Trainer:
         for epoch in range(start_epoch, epochs):
             self.model.train()
             data_load_start_time = time.time()
-            for batch,label in self.train_loader:
+            for batch,labels in self.train_loader:
+                print(f"labels in training shape: {labels.shape}")
                 batch = batch.to(self.device)
-                label = label.to(self.device).float()
+                labels = labels.to(self.device).float()
                 data_load_end_time = time.time()
-                logits = self.model.forward(batch)
-                loss = self.criterion(logits, label)
+                logits = self.model.forward(batch) #logits has a value between 0 and 1
+                logits = logits > 0.9 # and it needs to be either 0 or 1 (solution: threshold) 
+                logits = logits.int() # turn boolean tensor to int
+                loss = self.criterion(logits, labels)
 
                 loss.backward()
                 self.optimizer.step()
                 self.optimizer.zero_grad()
 
                 with torch.no_grad():
-                    preds = logits > 0.9
-                    preds = preds.int()
-                    accuracy = compute_accuracy(label, preds)
+                    preds = logits
+                    accuracy = compute_accuracy(labels, preds)
 
                 data_load_time = data_load_end_time - data_load_start_time
                 step_time = time.time() - data_load_end_time
@@ -255,7 +257,6 @@ class Trainer:
                 self.step += 1
                 data_load_start_time = time.time()
                 
-
             self.summary_writer.add_scalar("epoch", epoch, self.step)
             if ((epoch + 1) % val_frequency) == 0: 
                 self.validate()
@@ -299,14 +300,18 @@ class Trainer:
     def validate(self):
         preds = {}
         targets = {}
-        total_pair_wise_distance = 0
         self.model.eval()
 
+        total_sensitivity = 0
+        total_accuracy = 0
+        total_precision = 0
+        total_loss = 0
+        
         with torch.no_grad():  
             for idx, (batch, _) in enumerate(self.val_loader):
-                batch = batch.to(self.device) #batch is a tensor of shape [2500 42 42 3 3] 
+                batch = batch.to(self.device) # batch is a tensor of shape [2500 42 42 3 3] 
                 
-                logits = self.model(batch)  # logits has shape [2500] and holds 2500 predictions for each [42 42 3 3] tensor
+                logits = self.model(batch)  # logits has shape [2500] and holds predictions for each 2500 [42 42 3 3] tensors; (1 image -> 2500 predictions)
 
                 #get original image height and width
                 height, width = self.val_loader.dataset.dataset[idx]['X'].shape[1], self.val_loader.dataset.dataset[idx]['X'].shape[2] 
@@ -318,42 +323,61 @@ class Trainer:
                     size=(height, width), 
                     mode="bilinear", 
                     align_corners=False
-                ).squeeze(0).squeeze(0)  #using interpolation to bring down sampled saliency map to original  img size
+                ).squeeze(0).squeeze(0)  #using interpolation to bring down sampled saliency map to original img size
                 
                 filename = self.val_loader.dataset.dataset[idx]['file'][:-5] #prepare filename to extract ground truth fixation
 
                 gt_path = f"ALLFIXATIONMAPS/{filename}_fixMap.jpg"
                 gt_fixation_map = io.read_image(gt_path) 
-
+              #-----------------------
                 sm_flatten = saliency_map.flatten().to(self.device)
                 sm_flatten = sm_flatten > 0.9
                 sm_flatten = sm_flatten.int()
                 gt_flatten = gt_fixation_map.squeeze(0).flatten().to(self.device)
-                print(f"accuracy per sm_flatten, gt_flatten: {compute_accuracy(sm_flatten,gt_flatten)}")
-<<<<<<< HEAD
-               # print(f"sm_flatten first 10 values: {sm_flatten[:10]}")
-               
-               #print(f"gt_flatten first 10 values: {gt_flatten[:10]}")
-                print(f"number of 1s in gt_flatten: {(gt_flatten == 1).sum().item()} and of 0s {(gt_flatten==0).sum().item()}")
+                (tp, tn, fp, fn) = compute_statistics(gt_flatten, sm_flatten)
+                accuracy = compute_accuracy(gt_flatten,sm_flatten)
+                precision = compute_precision(tp, fp)
+                sensitivity = compute_sensitivity(tp,tn)
+                total_sensitivity += sensitivity
+                total_accuracy += accuracy
+                total_precision += precision
+                loss = self.criterion(sm_flatten, gt_flatten)
+                total_loss += loss.item()
+                print(f"(per batch) saliency map[{idx}]: accuracy {accuracy}, precision: {precision}, sensitivity: {sensitivity}, loss: {loss.item()}")
                #-----------------------
-=======
-                print(f"sm_flatten first 10 values: {sm_flatten[:10]}")
-                print(f"gt_flatten first 10 values: {gt_flatten[:10]}")
-                #-----------------------
->>>>>>> a5dcc593daa91ebb8f67288f9ced3e4b7a4ae7f8
-
                 saliency_map = saliency_map.cpu().numpy()
                 gt_fixation_map = gt_fixation_map.cpu().numpy()
 
                 preds[filename] = saliency_map
                 targets[filename] = gt_fixation_map
 
-        average_pair_wise_distance = total_pair_wise_distance / 100
+        n = len(self.val_loader)
+
+        average_accuracy = total_accuracy / n
         self.summary_writer.add_scalars(
-                "pair wise distance",
-                {"validation": average_pair_wise_distance},
+                "accuracy",
+                {"validation": average_accuracy},
                 self.step
         )
+        average_loss = total_loss / n
+        self.summary_writer.add_scalars(
+                "loss",
+                {"validation": average_loss},
+                self.step
+        )
+        average_sensitivity = total_sensitivity / n
+        self.summary_writer.add_scalars(
+                "sensitivity",
+                {"validation": average_sensitivity},
+                self.step
+        )
+        average_precision = total_precision / n
+        self.summary_writer.add_scalars(
+                "precision",
+                {"validation": average_precision},
+                self.step
+        )
+
         AUC = calculate_auc(preds, targets)
         self.summary_writer.add_scalars(
                 "AUC",
@@ -361,6 +385,7 @@ class Trainer:
                 self.step
         )
         print(f"validation AUC: {AUC}")
+        
 
 def compute_accuracy(labels, preds):
     total = labels.size(0) 
@@ -368,6 +393,14 @@ def compute_accuracy(labels, preds):
     accuracy = correct / total 
     
     return accuracy
+
+def compute_precision(tp, fp):
+    precision = tp / (tp + fp)
+    return precision
+
+def compute_sensitivity(tp, fn):
+    sensitivity = tp / (tp + fn)
+    return sensitivity
 
 def compute_statistics(labels, preds):
     true_positives = 0
