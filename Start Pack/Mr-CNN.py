@@ -331,8 +331,8 @@ class Trainer:
                 gt_path = f"ALLFIXATIONMAPS/{filename}_fixMap.jpg"
                 gt_fixation_map = io.read_image(gt_path) 
               #-----------------------
-                sm_flatten = saliency_map.flatten().to(self.device)
-                sm_flatten = sm_flatten > 0.9
+                sm_flatten_raw = saliency_map.flatten().to(self.device)
+                sm_flatten = sm_flatten_raw > 0.9
                 sm_flatten = sm_flatten.int()
                 gt_flatten = gt_fixation_map.squeeze(0).flatten().to(self.device)
                 (tp, tn, fp, fn) = compute_statistics(gt_flatten, sm_flatten)
@@ -344,7 +344,7 @@ class Trainer:
                 total_precision += precision
                 print(f"shape gt_flat: {gt_flatten.shape} and {sm_flatten.shape}")
                 #gt_flat_long = gt_flatten.long()
-                loss = self.criterion(sm_flatten, gt_flatten.long())
+                loss = self.criterion(sm_flatten_raw, gt_flatten.float())
                 total_loss += loss.item()
                 print(f"(per batch) saliency map[{idx}]: accuracy {accuracy}, precision: {precision}, sensitivity: {sensitivity}, loss: {loss.item()}")
                #-----------------------
